@@ -13,7 +13,6 @@ public class WebConfig implements WebMvcConfigurer {
                 .allowedOriginPatterns("*") // URL explicite obligatoire
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
-                .allowCredentials(true) // Nécessaire pour envoyer le Token/Cookies
                 .maxAge(3600);
     }
 }
