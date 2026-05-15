@@ -20,16 +20,23 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
 
+        // ✅ 1. Gérer la requête de pré-vérification (CORS Preflight)
+        // On laisse passer la requête OPTIONS pour que le WebConfig s'occupe des headers
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            response.setStatus(HttpServletResponse.SC_OK);
+            filterChain.doFilter(request, response);
+            return;
+        }
 
         String path = request.getServletPath();
 
-        // ✅ Routes publiques — pas de token requis
+        // ✅ 2. Routes publiques — pas de token requis
         if (path.startsWith("/api/auth") || path.startsWith("/api/inscription")) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        // Toutes les autres routes nécessitent un token JWT
+        // ✅ 3. Vérification du token JWT pour les routes protégées
         String authHeader = request.getHeader("Authorization");
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
@@ -43,7 +50,10 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             Claims claims = jwtService.extractAllClaims(token);
             request.setAttribute("userId", claims.get("userId"));
             request.setAttribute("role",   claims.get("role"));
+            
+            // Si le token est bon, on continue vers le Controller
             filterChain.doFilter(request, response);
+            
         } catch (Exception e) {
             System.err.println("Erreur de validation JWT : " + e.getMessage());
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);

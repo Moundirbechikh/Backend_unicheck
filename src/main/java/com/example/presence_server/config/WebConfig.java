@@ -10,9 +10,13 @@ public class WebConfig implements WebMvcConfigurer {
     @Override
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/**")
-                .allowedOriginPatterns("*") // URL explicite obligatoire
+                .allowedOrigins(
+                    "http://localhost:3000",                         // Pour tes tests en local
+                    "https://unicheck-drab.vercel.app"               // Ton site Vercel (Prod)
+                )
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
+                .allowCredentials(true) // Indispensable pour que le frontend envoie le header Authorization
                 .maxAge(3600);
     }
 }
