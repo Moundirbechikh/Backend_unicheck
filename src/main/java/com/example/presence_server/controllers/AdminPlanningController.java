@@ -13,7 +13,6 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/admin/planning")
-@CrossOrigin(origins = {"*"}, allowCredentials = "true")
 public class AdminPlanningController {
 
     @Autowired private SeanceRepository           seanceRepository;

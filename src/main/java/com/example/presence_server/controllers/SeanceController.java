@@ -19,7 +19,6 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/seances")
-@CrossOrigin(origins = "*", allowCredentials = "true")
 public class SeanceController {
 
     @Autowired private SeanceRepository      seanceRepository;

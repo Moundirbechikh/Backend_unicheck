@@ -18,7 +18,6 @@ import java.util.*;
 
 @RestController
 @RequestMapping("/api/justificatifs")
-@CrossOrigin(origins = "*", allowCredentials = "true")
 public class JustificatifController {
 
     @Autowired private JustificatifRepository  justificatifRepository;

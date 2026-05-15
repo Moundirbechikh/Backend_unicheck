@@ -11,7 +11,6 @@ import java.util.*;
 
 @RestController
 @RequestMapping("/api/cours")
-@CrossOrigin(origins = "*", allowCredentials = "true")
 public class CoursController {
 
     @Autowired private CoursRepository            coursRepository;

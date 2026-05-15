@@ -16,7 +16,6 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/presences")
-@CrossOrigin(origins = "*", allowCredentials = "true")
 public class PresenceController {
 
     @Autowired private PresenceRepository  presenceRepository;

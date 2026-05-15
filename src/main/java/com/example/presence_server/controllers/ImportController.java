@@ -17,7 +17,6 @@ import java.util.*;
 
 @RestController
 @RequestMapping("/api/import")
-@CrossOrigin(origins = "*", allowCredentials = "true")
 public class ImportController {
 
     @Autowired

@@ -17,7 +17,6 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/admin/dashboard")
-@CrossOrigin(origins = "*", allowCredentials = "true")
 public class AdminDashboardController {
 
     @Autowired private EtudiantRepository etudiantRepository;

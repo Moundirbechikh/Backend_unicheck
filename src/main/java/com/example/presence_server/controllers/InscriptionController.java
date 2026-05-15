@@ -13,7 +13,6 @@ import java.util.*;
 
 @RestController
 @RequestMapping("/api/inscription")
-@CrossOrigin(origins = "*", allowCredentials = "true")
 public class InscriptionController {
 
     @Autowired

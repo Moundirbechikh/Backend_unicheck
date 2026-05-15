@@ -12,7 +12,6 @@ import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/etudiants")
-@CrossOrigin(origins = "*", allowCredentials = "true")
 public class EtudiantController {
 
     @Autowired private EtudiantRepository  etudiantRepository;
