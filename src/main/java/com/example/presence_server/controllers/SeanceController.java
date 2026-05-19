@@ -235,98 +235,130 @@ seance.setDateHeureLancement(LocalDateTime.now()); // ← AJOUTER
     // PUT /api/seances/{id}/terminer
     // Termine la séance + supprime notifs lancement + envoie notifs de fin
     // ─────────────────────────────────────────────────────────────────────────
-    @PutMapping("/{id}/terminer")
-    @Transactional
-    public ResponseEntity<?> terminerSeance(@PathVariable Long id) {
+   @PutMapping("/{id}/terminer")
+@Transactional
+public ResponseEntity<?> terminerSeance(@PathVariable Long id) {
 
-        return seanceRepository.findById(id).map(seance -> {
+    return seanceRepository.findById(id).map(seance -> {
 
-            if (seance.isEstTerminee()) {
-                return ResponseEntity.ok(Map.of("message", "Déjà terminée"));
+        if (seance.isEstTerminee()) {
+            return ResponseEntity.ok(Map.of("message", "Déjà terminée"));
+        }
+
+        // ── Terminer la séance courante ──────────────────────────────────
+        seance.setEstActive(false);
+        seance.setEstTerminee(true);
+        seance.setDateHeureFin(LocalDateTime.now());
+        seanceRepository.saveAndFlush(seance);
+
+        // ── Recycling : créer la même séance pour la semaine prochaine ───
+        // (seulement si la séance avait un jour/heurePlage défini)
+        try {
+            if (seance.getJour() != null && seance.getHeurePlage() != null) {
+                LocalDateTime prochaineDate = calculerProchaineOccurrence(
+                        seance.getJour(), seance.getHeurePlage(), 7); // +7 jours
+
+                Seance prochaine = new Seance();
+                prochaine.setGroupe(seance.getGroupe());
+                prochaine.setJour(seance.getJour());
+                prochaine.setHeurePlage(seance.getHeurePlage());
+                prochaine.setSalle(seance.getSalle());
+                prochaine.setTypeSeance(seance.getTypeSeance());
+                prochaine.setCours(seance.getCours());
+                prochaine.setProfesseur(seance.getProfesseur());
+                prochaine.setTitre(seance.getTitre());
+                prochaine.setNumeroSeance(
+                        seance.getNumeroSeance() != null ? seance.getNumeroSeance() + 1 : 2);
+                prochaine.setDateHeureDebut(prochaineDate);
+                prochaine.setDateHeureFin(prochaineDate.plusMinutes(90));
+                prochaine.setDatePlanifiee(prochaineDate);
+                prochaine.setEstActive(false);
+                prochaine.setEstTerminee(false);
+                seanceRepository.save(prochaine);
+
+                System.out.println("🔄 [RECYCLING] Séance recréée pour le "
+                        + seance.getJour() + " prochain à " + seance.getHeurePlage());
             }
+        } catch (Exception ex) {
+            System.err.println("⚠️ Erreur recycling séance : " + ex.getMessage());
+        }
 
-            // ── Mise à jour de la séance ─────────────────────────────────────
-            seance.setEstActive(false);
-            seance.setEstTerminee(true);
-            seance.setDateHeureFin(LocalDateTime.now());
-            seanceRepository.saveAndFlush(seance);
+        // ── Notifications de fin ─────────────────────────────────────────
+        try {
+            String module  = seance.getCours() != null
+                             ? seance.getCours().getLibelle() : "Module inconnu";
+            Long   coursId = seance.getCours() != null ? seance.getCours().getId() : null;
+            String profNom = seance.getProfesseur() != null
+                             ? "Prof. " + seance.getProfesseur().getPrenom()
+                               + " " + seance.getProfesseur().getNom()
+                             : "votre professeur";
 
-            // ── Notifications de fin ─────────────────────────────────────────
-            try {
-                String module  = seance.getCours() != null
-                                 ? seance.getCours().getLibelle() : "Module inconnu";
-                Long coursId   = seance.getCours() != null
-                                 ? seance.getCours().getId() : null;
-                String profNom = seance.getProfesseur() != null 
-                                 ? "Prof. " + seance.getProfesseur().getPrenom() + " " + seance.getProfesseur().getNom() 
-                                 : "votre professeur";
+            notificationRepository.deleteBySeanceIdAndTypeNotification(seance.getId(), "LANCEMENT");
 
-                // 1. Supprimer les notifs de LANCEMENT pour cette séance
-                notificationRepository.deleteBySeanceIdAndTypeNotification(
-                        seance.getId(), "LANCEMENT");
+            List<Etudiant> etudiants = getEtudiantsConcerneParSeance(seance);
 
-                System.out.println("🗑️ [NOTIF] Notifs lancement supprimées pour séance " + seance.getId());
-
-                // 2. ✅ Utilisation du nouveau helper pour matcher la logique Dashboard
-                List<Etudiant> etudiants = getEtudiantsConcerneParSeance(seance);
-
-                // 3. Envoyer une notif de fin personnalisée à chaque étudiant
-                for (Etudiant e : etudiants) {
-
-                    long absences = 0;
-                    if (coursId != null) {
-                        // Total séances terminées de ce cours pour CE groupe précis
-                        long totalSeances = seanceRepository
-                                 .countByCours_IdAndGroupeAndEstTermineeTrue(coursId, seance.getGroupe());
-
-                        // Présences de cet étudiant
-                        long presences = presenceRepository
-                                 .countByEtudiant_IdAndSeance_Cours_IdAndStatutPresence(
-                                         e.getId(), coursId, "PRESENT");
-
-                        absences = Math.max(0, totalSeances - presences);
-                    }
-
-                    String gravite = calculerGravite(absences);
-                    String titre, message;
-                    
-                    if (absences == 0) {
-                        titre   = "✅ Séance terminée — " + module;
-                        message = "La séance de " + module + " est terminée. "
-                                 + "Félicitations, vous êtes présent(e) à toutes les séances de ce module !";
-                    } else {
-                        titre   = (absences >= 4 ? "🔴" : absences >= 2 ? "🟠" : "🟡")
-                                 + " Séance terminée — " + module;
-                        message = "La séance de " + module + " est terminée. "
-                                 + "Vous avez " + absences + " absence(s) enregistrée(s) pour ce module."
-                                 + (absences >= 4
-                                     ? " Attention : votre taux d'absence est critique."
-                                     : absences >= 2
-                                         ? " Veillez à régulariser votre assiduité."
-                                         : " Pensez à soumettre un justificatif si nécessaire.");
-                                         
-                        // 🔴 Envoi du mail si on atteint ou dépasse 4 absences
-                        if (absences == 4) { 
-                            if (e.getEmail() != null && !e.getEmail().isBlank()) {
-                                emailService.envoyerAlerteAbsence(e.getEmail(), e.getPrenom() + " " + e.getNom(), module, profNom, absences);
-                            }
-                        }
-                    }
-
-                    envoyerNotif(e, seance.getId(), "FIN", titre, message, gravite);
+            for (Etudiant e : etudiants) {
+                long absences = 0;
+                if (coursId != null) {
+                    long totalSeances = seanceRepository
+                            .countByCours_IdAndGroupeAndEstTermineeTrue(coursId, seance.getGroupe());
+                    long presences = presenceRepository
+                            .countByEtudiant_IdAndSeance_Cours_IdAndStatutPresence(
+                                    e.getId(), coursId, "PRESENT");
+                    absences = Math.max(0, totalSeances - presences);
                 }
 
-                System.out.println("✅ [NOTIF] Fin envoyée à " + etudiants.size() + " étudiant(s).");
+                String gravite = calculerGravite(absences);
+                String titre, message;
 
-            } catch (Exception ex) {
-                System.err.println("⚠️ Erreur notification fin : " + ex.getMessage());
+                if (absences == 0) {
+                    titre   = "✅ Séance terminée — " + module;
+                    message = "La séance de " + module + " est terminée. Félicitations, vous êtes présent(e) à toutes les séances !";
+                } else {
+                    titre   = (absences >= 4 ? "🔴" : absences >= 2 ? "🟠" : "🟡")
+                              + " Séance terminée — " + module;
+                    message = "La séance de " + module + " est terminée. Vous avez "
+                              + absences + " absence(s) pour ce module."
+                              + (absences >= 4 ? " Taux critique."
+                                 : absences >= 2 ? " Régularisez votre assiduité."
+                                 : " Soumettez un justificatif si nécessaire.");
+
+                    if (absences == 4 && e.getEmail() != null && !e.getEmail().isBlank()) {
+                        emailService.envoyerAlerteAbsence(
+                                e.getEmail(), e.getPrenom() + " " + e.getNom(),
+                                module, profNom, absences);
+                    }
+                }
+                envoyerNotif(e, seance.getId(), "FIN", titre, message, gravite);
             }
+        } catch (Exception ex) {
+            System.err.println("⚠️ Erreur notification fin : " + ex.getMessage());
+        }
 
-            return ResponseEntity.ok(Map.of("status", "success", "message", "Séance terminée."));
+        return ResponseEntity.ok(Map.of("status", "success", "message", "Séance terminée."));
 
-        }).orElse(ResponseEntity.notFound().build());
+    }).orElse(ResponseEntity.notFound().build());
+}
+
+// ── Helper : calculer la date de la prochaine occurrence ─────────────────
+private LocalDateTime calculerProchaineOccurrence(String jourStr, String heureStr, int daysOffset) {
+    DayOfWeek targetDay;
+    switch (jourStr.toLowerCase()) {
+        case "lundi":    targetDay = DayOfWeek.MONDAY;    break;
+        case "mardi":    targetDay = DayOfWeek.TUESDAY;   break;
+        case "mercredi": targetDay = DayOfWeek.WEDNESDAY; break;
+        case "jeudi":    targetDay = DayOfWeek.THURSDAY;  break;
+        case "vendredi": targetDay = DayOfWeek.FRIDAY;    break;
+        case "samedi":   targetDay = DayOfWeek.SATURDAY;  break;
+        default:         targetDay = DayOfWeek.SUNDAY;    break;
     }
-
+    LocalTime     heure = LocalTime.parse(heureStr);
+    LocalDateTime base  = LocalDateTime.now()
+            .with(java.time.temporal.TemporalAdjusters.next(targetDay))
+            .with(heure)
+            .withSecond(0).withNano(0);
+    return base;
+}
     // ─────────────────────────────────────────────────────────────────────────
     // Autres endpoints
     // ─────────────────────────────────────────────────────────────────────────

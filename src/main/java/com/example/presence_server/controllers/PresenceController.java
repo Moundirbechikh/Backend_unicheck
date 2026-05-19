@@ -191,7 +191,7 @@ public ResponseEntity<Map<String, Object>> validerScan(
 
     Map<String, Object> response = new HashMap<>();
     try {
-        // ── Résoudre etudiantId ──────────────────────────────────────────
+        // ── 1. Résoudre etudiantId ──────────────────────────────────────────
         Long etudiantId = request.getStudentId();
         if (etudiantId == null) {
             Integer uid = (Integer) httpRequest.getAttribute("userId");
@@ -211,44 +211,25 @@ public ResponseEntity<Map<String, Object>> validerScan(
         }
         Etudiant etudiant = etudiantOpt.get();
 
-        // ── Token : chercher séance active + séances récemment terminées ─────
-        // On cherche d'abord une séance active avec ce token
+        // ── 2. Chercher la séance active par token EXACT (Code Mis à Jour) ──
+        // Nettoyage et passage en majuscules pour éviter les erreurs de saisie
+        String tokenRecu = request.getToken() != null 
+                ? request.getToken().trim().toUpperCase() : "";
+
         List<Seance> seancesActives = seanceRepository
-                .findByCurrentTokenAndEstActiveTrue(request.getToken());
+                .findByCurrentTokenAndEstActiveTrue(tokenRecu);
 
-        Seance seance = null;
-
-        if (!seancesActives.isEmpty()) {
-            seance = seancesActives.get(0);
-        } else {
-            // ── Fallback : token récent (tolérance 30 secondes) ─────────────
-            // Si le token vient de tourner, le précédent token est encore acceptable
-            // pendant une courte fenêtre (latence réseau / Neon cold start)
-            List<Seance> toutesActives = seanceRepository.findAll().stream()
-                    .filter(s -> s.isEstActive() && !s.isEstTerminee())
-                    .collect(Collectors.toList());
-
-            // Cherche si une séance active contient le token comme token précédent
-            // (pas stocké → on tolère juste un décalage de timing de 30s)
-            // En pratique : on vérifie si la séance a été lancée récemment (< 30s)
-            // et le token a tourné récemment
-            for (Seance s : toutesActives) {
-                // Accepter si séance active et token potentiellement "de transition"
-                // On ne peut pas vérifier l'ancien token sans le stocker,
-                // donc on informe simplement l'étudiant de réessayer
-            }
-
-            if (seance == null) {
-                response.put("success", false);
-                response.put("message",
-                    "Code invalide ou séance non active. " +
-                    "Le code change toutes les 30 secondes, " +
-                    "vérifiez d'avoir le code le plus récent affiché par le professeur.");
-                return ResponseEntity.ok(response);
-            }
+        if (seancesActives.isEmpty()) {
+            response.put("success", false);
+            response.put("message",
+                "Code expiré ou invalide. Le code change toutes les 10 secondes — " +
+                "attendez le prochain code affiché et réessayez.");
+            return ResponseEntity.ok(response);
         }
 
-        // ── Anti-doublon ─────────────────────────────────────────────────
+        Seance seance = seancesActives.get(0);
+
+        // ── 3. Anti-doublon ─────────────────────────────────────────────────
         if (presenceRepository.findByEtudiant_IdAndSeance_Id(
                 etudiantId, seance.getId()).isPresent()) {
             response.put("success", false);
@@ -256,15 +237,15 @@ public ResponseEntity<Map<String, Object>> validerScan(
             return ResponseEntity.ok(response);
         }
 
-        // ── CONDITION GPS : distance souple (100m) avec vérification précision ──
+        // ── 4. GPS : Seuil strict (100m) ───────────────────────────────────
         double distanceCalculee = 0;
 
         boolean etudiantAGps = request.getStudentLat() != null
                 && request.getStudentLng() != null
-                && (request.getStudentLat() != 0.0 || request.getStudentLng() != 0.0);
+                && !(request.getStudentLat() == 0.0 && request.getStudentLng() == 0.0);
 
         boolean profAGps = seance.getProfLat() != null && seance.getProfLng() != null
-                && (seance.getProfLat() != 0.0 || seance.getProfLng() != 0.0);
+                && !(seance.getProfLat() == 0.0 && seance.getProfLng() == 0.0);
 
         if (etudiantAGps && profAGps) {
             distanceCalculee = calculerDistance(
@@ -272,41 +253,38 @@ public ResponseEntity<Map<String, Object>> validerScan(
                     seance.getProfLat(),     seance.getProfLng()
             );
 
-            // Seuil : 150m (GPS mobile indoor = 5-50m d'imprécision naturelle)
-            // Un bâtiment universitaire typique = 50-80m de long
-            // 150m couvre largement le bâtiment tout en bloquant les fraudes hors campus
-            final double SEUIL_DISTANCE_METRES = 150.0;
-
-            if (distanceCalculee > SEUIL_DISTANCE_METRES) {
-                response.put("success",   false);
-                response.put("message",   String.format(
-                    "Vous semblez être loin du lieu de cours (%.0fm détectés). " +
-                    "Assurez-vous d'être dans le bâtiment.",
+            // Seuil mis à jour à 100m (idéal pour couvrir le bâtiment et bloquer les fraudes)
+            if (distanceCalculee > 100.0) {
+                response.put("success", false);
+                response.put("message", String.format(
+                    "Vous êtes trop loin du cours (%.0fm détectés, max 100m). " +
+                    "Assurez-vous d'être dans le bâtiment et réessayez.",
                     distanceCalculee));
                 response.put("distanceM", Math.round(distanceCalculee));
                 return ResponseEntity.ok(response);
             }
         }
-        // Si GPS manquant d'un côté → on ne bloque pas (mode dégradé)
+        // GPS absent d'un côté → mode dégradé, on laisse passer pour éviter de bloquer la classe
 
-        // ── Device ID : enregistrement / vérification ────────────────────
-        String deviceIdRequest = request.getDeviceId();
-
-        if (deviceIdRequest != null && !deviceIdRequest.isBlank()
-                && !"TEST_MODE".equals(deviceIdRequest)) {
+        // ── 5. Device ID ────────────────────────────────────────────────────
+        String deviceIdRecu = request.getDeviceId();
+        if (deviceIdRecu != null && !deviceIdRecu.isBlank()
+                && !"TEST_MODE".equals(deviceIdRecu)) {
 
             if (etudiant.getDeviceId() == null || etudiant.getDeviceId().isBlank()) {
-                etudiant.setDeviceId(deviceIdRequest);
+                // Premier pointage : on lie définitivement l'appareil à l'étudiant
+                etudiant.setDeviceId(deviceIdRecu);
                 etudiantRepository.save(etudiant);
-            } else if (!etudiant.getDeviceId().equals(deviceIdRequest)) {
+            } else if (!etudiant.getDeviceId().equals(deviceIdRecu)) {
                 response.put("success", false);
                 response.put("message",
-                    "Appareil non reconnu. Utilisez l'appareil enregistré lors de votre premier pointage.");
+                    "Appareil non reconnu. Utilisez l'appareil avec lequel " +
+                    "vous avez effectué votre premier pointage.");
                 return ResponseEntity.ok(response);
             }
         }
 
-        // ── Enregistrement ────────────────────────────────────────────────
+        // ── 6. Enregistrement de la présence ───────────────────────────────
         Presence presence = new Presence();
         presence.setEtudiant(etudiant);
         presence.setSeance(seance);
@@ -318,8 +296,8 @@ public ResponseEntity<Map<String, Object>> validerScan(
             presence.setStudentLat(request.getStudentLat());
             presence.setStudentLng(request.getStudentLng());
         }
-        if (deviceIdRequest != null && !deviceIdRequest.isBlank()) {
-            presence.setDeviceUsed(deviceIdRequest);
+        if (deviceIdRecu != null && !deviceIdRecu.isBlank()) {
+            presence.setDeviceUsed(deviceIdRecu);
         }
 
         presenceRepository.save(presence);
@@ -327,12 +305,18 @@ public ResponseEntity<Map<String, Object>> validerScan(
         String heure = LocalDateTime.now().format(
                 java.time.format.DateTimeFormatter.ofPattern("HH:mm"));
 
+        // Préparation de la réponse de succès
         response.put("success", true);
-        response.put("message", "Présence validée avec succès !");
-        response.put("heure",   heure);
+        response.put("message", "Présence validée !");
+        response.put("heure", heure);
         if (distanceCalculee > 0) {
             response.put("distanceM", Math.round(distanceCalculee));
         }
+
+        // Log de suivi dans la console du serveur Render
+        System.out.printf("✅ [SCAN] %s %s | Séance %d | %.1fm%n",
+                etudiant.getPrenom(), etudiant.getNom(),
+                seance.getId(), distanceCalculee);
 
         return ResponseEntity.ok(response);
 
@@ -345,11 +329,10 @@ public ResponseEntity<Map<String, Object>> validerScan(
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Helper : Calcul de distance (formule de Haversine) en mètres
+// Helper indispensable : Calcul de distance (formule de Haversine) en mètres
 // ─────────────────────────────────────────────────────────────────────────
 private double calculerDistance(double lat1, double lng1, double lat2, double lng2) {
-    final double R = 6371000.0;
-    // Rayon terrestre en mètres
+    final double R = 6371000.0; // Rayon de la Terre en mètres
     double dLat    = Math.toRadians(lat2 - lat1);
     double dLng    = Math.toRadians(lng2 - lng1);
     double a       = Math.sin(dLat / 2) * Math.sin(dLat / 2)
@@ -358,7 +341,6 @@ private double calculerDistance(double lat1, double lng1, double lat2, double ln
     double c       = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
 }
-
 @GetMapping("/seance/{seanceId}")
 public ResponseEntity<List<Map<String, Object>>> getPresencesBySeance(
         @PathVariable Long seanceId) {
