@@ -170,72 +170,93 @@ private Map<String, Object> formatSeancePourDashboard(Seance s) {
     // PUT /api/seances/{id}/lancer
     // Lance la séance + envoie une notification
     // ─────────────────────────────────────────────────────────────────────────
-    @PutMapping("/{id}/lancer")
-    @Transactional
-    public ResponseEntity<?> lancerSeance(
-            @PathVariable Long id,
-            @RequestBody Map<String, Double> localisation) {
+@PutMapping("/{id}/lancer")
+@Transactional
+public ResponseEntity<?> lancerSeance(
+        @PathVariable Long id,
+        @RequestBody Map<String, Double> localisation) {
 
-        return seanceRepository.findById(id).map(seance -> {
+    return seanceRepository.findById(id).map(seance -> {
 
-            if (seance.isEstTerminee()) {
-                return ResponseEntity.badRequest()
-                        .body(Map.of("error", "Cette séance est déjà terminée."));
+        if (seance.isEstTerminee()) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "Cette séance est déjà terminée."));
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+
+        seance.setEstActive(true);
+        seance.setTimerPaused(false);
+        seance.setDateHeureDebut(now);
+        seance.setDateHeureLancement(now);
+        seance.setCurrentToken(generateRandomToken());
+        seance.setTokenLastRefreshedAt(now);   // ← SYNC TIMER
+        seance.setPausedElapsedMs(0L);          // ← RESET ELAPSED
+
+        if (localisation.containsKey("lat") && localisation.containsKey("lng")) {
+            seance.setProfLat(localisation.get("lat"));
+            seance.setProfLng(localisation.get("lng"));
+        }
+
+        Seance saved = seanceRepository.saveAndFlush(seance);
+
+        try {
+            String module  = seance.getCours()      != null ? seance.getCours().getLibelle() : "Module inconnu";
+            String profNom = seance.getProfesseur() != null
+                    ? "Prof. " + seance.getProfesseur().getPrenom() + " " + seance.getProfesseur().getNom()
+                    : "votre professeur";
+            String heure   = now.format(DateTimeFormatter.ofPattern("HH:mm"));
+            String titre   = "📚 Séance lancée — " + module;
+            String message = "La séance de " + module + " vient d'être lancée par " + profNom + " à " + heure + ".";
+
+            List<Etudiant> etudiants = getEtudiantsConcerneParSeance(seance);
+            for (Etudiant e : etudiants) {
+                envoyerNotif(e, saved.getId(), "LANCEMENT", titre, message, "VERT");
             }
+        } catch (Exception ex) {
+            System.err.println("⚠️ Notif lancement : " + ex.getMessage());
+        }
 
-            // ── Mise à jour de la séance ─────────────────────────────────────
-            seance.setEstActive(true);
-            seance.setTimerPaused(false);
-            seance.setDateHeureDebut(LocalDateTime.now());
-seance.setDateHeureLancement(LocalDateTime.now()); // ← AJOUTER
-            seance.setCurrentToken(generateRandomToken());
+        return ResponseEntity.ok(saved);
 
-            if (localisation.containsKey("lat") && localisation.containsKey("lng")) {
-                seance.setProfLat(localisation.get("lat"));
-                seance.setProfLng(localisation.get("lng"));
-            }
+    }).orElse(ResponseEntity.notFound().build());
+}
 
-            Seance saved = seanceRepository.saveAndFlush(seance);
 
-            // ── Notifications aux étudiants ──────────────────────────────────
-            try {
-                String module   = seance.getCours() != null
-                                  ? seance.getCours().getLibelle() : "Module inconnu";
-                String profNom  = seance.getProfesseur() != null
-                                  ? "Prof. " + seance.getProfesseur().getPrenom()
-                                    + " " + seance.getProfesseur().getNom()
-                                  : "votre professeur";
-                String heure    = LocalDateTime.now()
-                                  .format(DateTimeFormatter.ofPattern("HH:mm"));
+@GetMapping("/{id}/session-state")
+public ResponseEntity<?> getSessionState(@PathVariable Long id) {
+    return seanceRepository.findById(id).map(seance -> {
+        LocalDateTime now = LocalDateTime.now();
 
-                String titre   = "📚 Séance lancée — " + module;
-                String message = "La séance de " + module + " vient d'être lancée par "
-                               + profNom + " à " + heure + ".";
+        long elapsedMs;
+        if (seance.isTimerPaused()) {
+            // En pause : retourner le temps figé au moment de la pause
+            elapsedMs = seance.getPausedElapsedMs() != null ? seance.getPausedElapsedMs() : 0L;
+        } else if (seance.getTokenLastRefreshedAt() != null) {
+            // En cours : calculer depuis le dernier refresh token
+            elapsedMs = java.time.Duration.between(
+                    seance.getTokenLastRefreshedAt(), now).toMillis();
+        } else {
+            elapsedMs = 0L;
+        }
 
-                // ✅ Utilisation du nouveau helper pour matcher la logique Dashboard
-                List<Etudiant> etudiants = getEtudiantsConcerneParSeance(seance);
+        Map<String, Object> state = new HashMap<>();
+        state.put("token",         seance.getCurrentToken() != null ? seance.getCurrentToken() : "");
+        state.put("isTimerPaused", seance.isTimerPaused());
+        state.put("elapsedMs",     Math.min(elapsedMs, 10500L)); // cap à 10.5s
+        state.put("estActive",     seance.isEstActive());
+        state.put("estTerminee",   seance.isEstTerminee());
 
-                for (Etudiant e : etudiants) {
-                    envoyerNotif(e, saved.getId(), "LANCEMENT",
-                                   titre, message, "VERT");
-                }
+        return ResponseEntity.ok(state);
+    }).orElse(ResponseEntity.notFound().build());
+}
 
-                System.out.println("✅ [NOTIF] Lancement envoyé à "
-                                    + etudiants.size() + " étudiant(s). (Groupe séance: " + seance.getGroupe() + ")");
-            } catch (Exception ex) {
-                System.err.println("⚠️ Erreur notification lancement : " + ex.getMessage());
-            }
-
-            return ResponseEntity.ok(saved);
-
-        }).orElse(ResponseEntity.notFound().build());
-    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // PUT /api/seances/{id}/terminer
     // Termine la séance + supprime notifs lancement + envoie notifs de fin
     // ─────────────────────────────────────────────────────────────────────────
-   @PutMapping("/{id}/terminer")
+  @PutMapping("/{id}/terminer")
 @Transactional
 public ResponseEntity<?> terminerSeance(@PathVariable Long id) {
 
@@ -245,18 +266,26 @@ public ResponseEntity<?> terminerSeance(@PathVariable Long id) {
             return ResponseEntity.ok(Map.of("message", "Déjà terminée"));
         }
 
-        // ── Terminer la séance courante ──────────────────────────────────
         seance.setEstActive(false);
         seance.setEstTerminee(true);
         seance.setDateHeureFin(LocalDateTime.now());
         seanceRepository.saveAndFlush(seance);
 
-        // ── Recycling : créer la même séance pour la semaine prochaine ───
-        // (seulement si la séance avait un jour/heurePlage défini)
+        // ── RECYCLING : +7 jours EXACT sur datePlanifiee ─────────────────────
         try {
             if (seance.getJour() != null && seance.getHeurePlage() != null) {
-                LocalDateTime prochaineDate = calculerProchaineOccurrence(
-                        seance.getJour(), seance.getHeurePlage(), 7); // +7 jours
+
+                // La prochaine occurrence = datePlanifiee + 7 jours
+                // (jamais basé sur "aujourd'hui", toujours sur la date prévue)
+                LocalDateTime nextPlanifiee;
+                if (seance.getDatePlanifiee() != null) {
+                    nextPlanifiee = seance.getDatePlanifiee().plusDays(7);
+                } else if (seance.getDateHeureDebut() != null) {
+                    nextPlanifiee = seance.getDateHeureDebut().plusDays(7);
+                } else {
+                    LocalTime heure = LocalTime.parse(seance.getHeurePlage());
+                    nextPlanifiee   = LocalDateTime.now().plusDays(7).with(heure);
+                }
 
                 Seance prochaine = new Seance();
                 prochaine.setGroupe(seance.getGroupe());
@@ -269,43 +298,40 @@ public ResponseEntity<?> terminerSeance(@PathVariable Long id) {
                 prochaine.setTitre(seance.getTitre());
                 prochaine.setNumeroSeance(
                         seance.getNumeroSeance() != null ? seance.getNumeroSeance() + 1 : 2);
-                prochaine.setDateHeureDebut(prochaineDate);
-                prochaine.setDateHeureFin(prochaineDate.plusMinutes(90));
-                prochaine.setDatePlanifiee(prochaineDate);
+                prochaine.setDateHeureDebut(nextPlanifiee);
+                prochaine.setDateHeureFin(nextPlanifiee.plusMinutes(90));
+                prochaine.setDatePlanifiee(nextPlanifiee);
                 prochaine.setEstActive(false);
                 prochaine.setEstTerminee(false);
                 seanceRepository.save(prochaine);
 
-                System.out.println("🔄 [RECYCLING] Séance recréée pour le "
-                        + seance.getJour() + " prochain à " + seance.getHeurePlage());
+                System.out.println("🔄 [RECYCLING] Séance recréée le "
+                        + nextPlanifiee.toLocalDate() + " à " + seance.getHeurePlage());
             }
         } catch (Exception ex) {
-            System.err.println("⚠️ Erreur recycling séance : " + ex.getMessage());
+            System.err.println("⚠️ Recycling : " + ex.getMessage());
         }
 
-        // ── Notifications de fin ─────────────────────────────────────────
+        // ── Notifications de fin ─────────────────────────────────────────────
         try {
-            String module  = seance.getCours() != null
-                             ? seance.getCours().getLibelle() : "Module inconnu";
-            Long   coursId = seance.getCours() != null ? seance.getCours().getId() : null;
+            String module  = seance.getCours() != null ? seance.getCours().getLibelle() : "Module inconnu";
+            Long   coursId = seance.getCours() != null ? seance.getCours().getId()       : null;
             String profNom = seance.getProfesseur() != null
-                             ? "Prof. " + seance.getProfesseur().getPrenom()
-                               + " " + seance.getProfesseur().getNom()
-                             : "votre professeur";
+                    ? "Prof. " + seance.getProfesseur().getPrenom() + " " + seance.getProfesseur().getNom()
+                    : "votre professeur";
 
             notificationRepository.deleteBySeanceIdAndTypeNotification(seance.getId(), "LANCEMENT");
 
             List<Etudiant> etudiants = getEtudiantsConcerneParSeance(seance);
-
             for (Etudiant e : etudiants) {
                 long absences = 0;
                 if (coursId != null) {
-                    long totalSeances = seanceRepository
+                    long total = seanceRepository
                             .countByCours_IdAndGroupeAndEstTermineeTrue(coursId, seance.getGroupe());
                     long presences = presenceRepository
                             .countByEtudiant_IdAndSeance_Cours_IdAndStatutPresence(
                                     e.getId(), coursId, "PRESENT");
-                    absences = Math.max(0, totalSeances - presences);
+                    absences = Math.max(0, total - presences);
                 }
 
                 String gravite = calculerGravite(absences);
@@ -315,63 +341,60 @@ public ResponseEntity<?> terminerSeance(@PathVariable Long id) {
                     titre   = "✅ Séance terminée — " + module;
                     message = "La séance de " + module + " est terminée. Félicitations, vous êtes présent(e) à toutes les séances !";
                 } else {
-                    titre   = (absences >= 4 ? "🔴" : absences >= 2 ? "🟠" : "🟡")
-                              + " Séance terminée — " + module;
+                    titre   = (absences >= 4 ? "🔴" : absences >= 2 ? "🟠" : "🟡") + " Séance terminée — " + module;
                     message = "La séance de " + module + " est terminée. Vous avez "
-                              + absences + " absence(s) pour ce module."
-                              + (absences >= 4 ? " Taux critique."
-                                 : absences >= 2 ? " Régularisez votre assiduité."
-                                 : " Soumettez un justificatif si nécessaire.");
+                            + absences + " absence(s)."
+                            + (absences >= 4 ? " Taux critique." : absences >= 2 ? " Régularisez votre assiduité." : " Justificatif si nécessaire.");
 
                     if (absences == 4 && e.getEmail() != null && !e.getEmail().isBlank()) {
                         emailService.envoyerAlerteAbsence(
-                                e.getEmail(), e.getPrenom() + " " + e.getNom(),
-                                module, profNom, absences);
+                                e.getEmail(), e.getPrenom() + " " + e.getNom(), module, profNom, absences);
                     }
                 }
                 envoyerNotif(e, seance.getId(), "FIN", titre, message, gravite);
             }
         } catch (Exception ex) {
-            System.err.println("⚠️ Erreur notification fin : " + ex.getMessage());
+            System.err.println("⚠️ Notif fin : " + ex.getMessage());
         }
 
         return ResponseEntity.ok(Map.of("status", "success", "message", "Séance terminée."));
 
     }).orElse(ResponseEntity.notFound().build());
 }
-
-// ── Helper : calculer la date de la prochaine occurrence ─────────────────
-private LocalDateTime calculerProchaineOccurrence(String jourStr, String heureStr, int daysOffset) {
-    DayOfWeek targetDay;
-    switch (jourStr.toLowerCase()) {
-        case "lundi":    targetDay = DayOfWeek.MONDAY;    break;
-        case "mardi":    targetDay = DayOfWeek.TUESDAY;   break;
-        case "mercredi": targetDay = DayOfWeek.WEDNESDAY; break;
-        case "jeudi":    targetDay = DayOfWeek.THURSDAY;  break;
-        case "vendredi": targetDay = DayOfWeek.FRIDAY;    break;
-        case "samedi":   targetDay = DayOfWeek.SATURDAY;  break;
-        default:         targetDay = DayOfWeek.SUNDAY;    break;
-    }
-    LocalTime     heure = LocalTime.parse(heureStr);
-    LocalDateTime base  = LocalDateTime.now()
-            .with(java.time.temporal.TemporalAdjusters.next(targetDay))
-            .with(heure)
-            .withSecond(0).withNano(0);
-    return base;
-}
     // ─────────────────────────────────────────────────────────────────────────
     // Autres endpoints
     // ─────────────────────────────────────────────────────────────────────────
 
-    @PutMapping("/{id}/toggle-timer")
-    @Transactional
-    public ResponseEntity<Map<String, Boolean>> toggleTimer(@PathVariable Long id) {
-        return seanceRepository.findById(id).map(seance -> {
-            seance.setTimerPaused(!seance.isTimerPaused());
-            seanceRepository.saveAndFlush(seance);
-            return ResponseEntity.ok(Map.of("isPaused", seance.isTimerPaused()));
-        }).orElse(ResponseEntity.notFound().build());
-    }
+@PutMapping("/{id}/toggle-timer")
+@Transactional
+public ResponseEntity<Map<String, Object>> toggleTimer(@PathVariable Long id) {
+    return seanceRepository.findById(id).map(seance -> {
+        LocalDateTime now      = LocalDateTime.now();
+        boolean       newPaused = !seance.isTimerPaused();
+
+        if (newPaused) {
+            // ── Mise en PAUSE : sauvegarder l'elapsed actuel ─────────────────
+            long elapsed = seance.getTokenLastRefreshedAt() != null
+                    ? java.time.Duration.between(seance.getTokenLastRefreshedAt(), now).toMillis()
+                    : 0L;
+            seance.setPausedElapsedMs(Math.min(elapsed, 10000L));
+        } else {
+            // ── REPRISE : recalculer tokenLastRefreshedAt pour que l'elapsed
+            //    continue depuis le bon endroit ──────────────────────────────
+            long pausedMs = seance.getPausedElapsedMs() != null ? seance.getPausedElapsedMs() : 0L;
+            // tokenLastRefreshedAt = now - pausedElapsedMs
+            seance.setTokenLastRefreshedAt(now.minusNanos(pausedMs * 1_000_000L));
+        }
+
+        seance.setTimerPaused(newPaused);
+        seanceRepository.saveAndFlush(seance);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("isPaused",  newPaused);
+        result.put("elapsedMs", seance.getPausedElapsedMs());
+        return ResponseEntity.ok(result);
+    }).orElse(ResponseEntity.notFound().build());
+}
 
     @GetMapping("/{id}/token")
     public ResponseEntity<Map<String, String>> getCurrentToken(@PathVariable Long id) {
@@ -394,19 +417,35 @@ public ResponseEntity<List<Map<String, Object>>> getSeancesByDate(
             .collect(Collectors.toList()));
 }
 
-    @PutMapping("/{id}/refresh-token")
-    @Transactional
-    public ResponseEntity<?> refreshToken(@PathVariable Long id) {
-        return seanceRepository.findById(id).map(seance -> {
-            if (seance.isTimerPaused())
-                return ResponseEntity.badRequest().body(Map.of("error", "Timer en pause."));
-            if (seance.isEstTerminee())
-                return ResponseEntity.badRequest().body(Map.of("error", "Séance terminée."));
-            seance.setCurrentToken(generateRandomToken());
-            seanceRepository.saveAndFlush(seance);
-            return ResponseEntity.ok(Map.of("token", seance.getCurrentToken()));
-        }).orElse(ResponseEntity.notFound().build());
-    }
+@PutMapping("/{id}/refresh-token")
+@Transactional
+public ResponseEntity<?> refreshToken(@PathVariable Long id) {
+    return seanceRepository.findById(id).map(seance -> {
+        if (seance.isTimerPaused())
+            return ResponseEntity.badRequest().body(Map.of("error", "Timer en pause."));
+        if (seance.isEstTerminee())
+            return ResponseEntity.badRequest().body(Map.of("error", "Séance terminée."));
+
+        // ── Protection race condition multi-device ────────────────────────────
+        // Si le token vient d'être rafraîchi il y a moins de 8s → renvoyer le token actuel
+        if (seance.getTokenLastRefreshedAt() != null) {
+            long elapsed = java.time.Duration.between(
+                    seance.getTokenLastRefreshedAt(), LocalDateTime.now()).toMillis();
+            if (elapsed < 8000) {
+                return ResponseEntity.ok(Map.of("token", seance.getCurrentToken()));
+            }
+        }
+
+        // ── Générer et sauvegarder le nouveau token ───────────────────────────
+        LocalDateTime now = LocalDateTime.now();
+        seance.setCurrentToken(generateRandomToken());
+        seance.setTokenLastRefreshedAt(now);
+        seance.setPausedElapsedMs(0L);
+        seanceRepository.saveAndFlush(seance);
+
+        return ResponseEntity.ok(Map.of("token", seance.getCurrentToken()));
+    }).orElse(ResponseEntity.notFound().build());
+}
     
     @GetMapping("/etudiant/specialite/{specialite}/date")
     public ResponseEntity<List<Map<String, Object>>> getSeancesBySpecialite(

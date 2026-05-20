@@ -41,6 +41,13 @@ public class Seance {
 // Après : private LocalDateTime dateHeureFin;
 // Ajouter :
 
+// Ajouter ces 2 champs après dateHeureLancement
+@Column(name = "token_last_refreshed_at")
+private LocalDateTime tokenLastRefreshedAt;
+
+@Column(name = "paused_elapsed_ms")
+private Long pausedElapsedMs = 0L;
+
 @Column(name = "date_planifiee")
 private LocalDateTime datePlanifiee;      // Date prévue par l'admin (jamais écrasée)
 
