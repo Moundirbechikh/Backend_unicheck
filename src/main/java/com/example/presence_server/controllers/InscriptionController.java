@@ -11,6 +11,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 
 @RestController
 @RequestMapping("/api/inscription")
@@ -22,7 +23,6 @@ public class InscriptionController {
     @Autowired
     private UserRepositorie userRepositorie;
 
-    // Injection du service d'email pour l'envoi automatique après inscription
     @Autowired
     private EmailService emailService;
 
@@ -152,9 +152,17 @@ public class InscriptionController {
         etudiant.setGroupe(groupe);
         etudiantRepository.save(etudiant);
 
-        // 🚀 ENVOI AUTOMATIQUE DU MAIL DE BIENVENUE ÉTUDIANT
+        // 🚀 CORRECTION : ENVOI DU MAIL EN ASYNCHRONE (Ne bloque plus le frontend)
         String nomComplet = etudiant.getPrenom() + " " + etudiant.getNom();
-        emailService.envoyerMailBienvenue(etudiant.getEmail(), nomComplet, "Étudiant");
+        String mailDestinataire = etudiant.getEmail();
+        
+        CompletableFuture.runAsync(() -> {
+            try {
+                emailService.envoyerMailBienvenue(mailDestinataire, nomComplet, "Étudiant");
+            } catch (Exception e) {
+                System.err.println("❌ Erreur asynchrone lors de l'envoi du mail (Etudiant) : " + e.getMessage());
+            }
+        });
 
         result.put("success", true);
         result.put("message", "Compte créé avec succès.");
@@ -195,9 +203,17 @@ public class InscriptionController {
         prof.setMotDePasse(password);
         userRepositorie.save(prof);
 
-        // 🚀 ENVOI AUTOMATIQUE DU MAIL DE BIENVENUE PROFESSEUR
+        // 🚀 CORRECTION : ENVOI DU MAIL EN ASYNCHRONE (Ne bloque plus le frontend)
         String nomComplet = prof.getPrenom() + " " + prof.getNom();
-        emailService.envoyerMailBienvenue(prof.getEmail(), nomComplet, "Enseignant");
+        String mailDestinataire = prof.getEmail();
+        
+        CompletableFuture.runAsync(() -> {
+            try {
+                emailService.envoyerMailBienvenue(mailDestinataire, nomComplet, "Enseignant");
+            } catch (Exception e) {
+                System.err.println("❌ Erreur asynchrone lors de l'envoi du mail (Professeur) : " + e.getMessage());
+            }
+        });
 
         result.put("success", true);
         result.put("message", "Compte professeur créé avec succès.");
