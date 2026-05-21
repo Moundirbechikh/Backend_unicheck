@@ -4,6 +4,7 @@ import com.example.presence_server.models.Etudiant;
 import com.example.presence_server.models.Professeur;
 import com.example.presence_server.repositories.EtudiantRepository;
 import com.example.presence_server.repositories.UserRepositorie;
+import com.example.presence_server.services.EmailService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -21,12 +22,14 @@ public class InscriptionController {
     @Autowired
     private UserRepositorie userRepositorie;
 
+    // Injection du service d'email pour l'envoi automatique après inscription
+    @Autowired
+    private EmailService emailService;
+
     private static final String CODE_PROF_SECRET = "PROF2024";
 
     // ─────────────────────────────────────────────────────────────────────────
     // 1. GET /api/inscription/etudiants-sans-compte
-    //    Retourne les étudiants importés qui n'ont pas encore créé leur compte
-    //    = ceux dont le motDePasse est NULL (importés mais pas encore inscrits)
     // ─────────────────────────────────────────────────────────────────────────
     @GetMapping("/etudiants-sans-compte")
     public ResponseEntity<List<Map<String, Object>>> getEtudiantsSansCompte() {
@@ -34,7 +37,6 @@ public class InscriptionController {
         List<Map<String, Object>> result = new ArrayList<>();
 
         for (Etudiant e : tous) {
-            // ✅ Importé mais pas encore inscrit = motDePasse null ET nom+prenom présents
             boolean sansMdp  = e.getMotDePasse() == null;
             boolean aUnNom   = e.getNom()    != null && !e.getNom().isBlank();
             boolean aUnPrenom = e.getPrenom() != null && !e.getPrenom().isBlank();
@@ -47,13 +49,11 @@ public class InscriptionController {
                 result.add(dto);
             }
         }
-
         return ResponseEntity.ok(result);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // 2. POST /api/inscription/verifier-code-prof
-    //    Vérifie uniquement le code prof AVANT le formulaire
     // ─────────────────────────────────────────────────────────────────────────
     @PostMapping("/verifier-code-prof")
     public ResponseEntity<Map<String, Object>> verifierCodeProf(
@@ -70,7 +70,6 @@ public class InscriptionController {
 
     // ─────────────────────────────────────────────────────────────────────────
     // 3. POST /api/inscription/verifier-identite
-    //    Vérifie { etudiantId + matricule } — le matricule n'est JAMAIS renvoyé
     // ─────────────────────────────────────────────────────────────────────────
     @PostMapping("/verifier-identite")
     public ResponseEntity<Map<String, Object>> verifierIdentite(
@@ -103,7 +102,6 @@ public class InscriptionController {
 
     // ─────────────────────────────────────────────────────────────────────────
     // 4. PUT /api/inscription/etudiant/{id}/finaliser
-    //    Met à jour email, password, specialite, groupe
     // ─────────────────────────────────────────────────────────────────────────
     @PutMapping("/etudiant/{id}/finaliser")
     public ResponseEntity<Map<String, Object>> finaliserCompteEtudiant(
@@ -154,6 +152,10 @@ public class InscriptionController {
         etudiant.setGroupe(groupe);
         etudiantRepository.save(etudiant);
 
+        // 🚀 ENVOI AUTOMATIQUE DU MAIL DE BIENVENUE ÉTUDIANT
+        String nomComplet = etudiant.getPrenom() + " " + etudiant.getNom();
+        emailService.envoyerMailBienvenue(etudiant.getEmail(), nomComplet, "Étudiant");
+
         result.put("success", true);
         result.put("message", "Compte créé avec succès.");
         return ResponseEntity.ok(result);
@@ -161,7 +163,6 @@ public class InscriptionController {
 
     // ─────────────────────────────────────────────────────────────────────────
     // 5. POST /api/inscription/professeur
-    //    Crée un compte professeur
     // ─────────────────────────────────────────────────────────────────────────
     @PostMapping("/professeur")
     public ResponseEntity<Map<String, Object>> inscrireProf(
@@ -193,6 +194,10 @@ public class InscriptionController {
         prof.setEmail(email);
         prof.setMotDePasse(password);
         userRepositorie.save(prof);
+
+        // 🚀 ENVOI AUTOMATIQUE DU MAIL DE BIENVENUE PROFESSEUR
+        String nomComplet = prof.getPrenom() + " " + prof.getNom();
+        emailService.envoyerMailBienvenue(prof.getEmail(), nomComplet, "Enseignant");
 
         result.put("success", true);
         result.put("message", "Compte professeur créé avec succès.");

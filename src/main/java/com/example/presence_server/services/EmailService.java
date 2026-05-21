@@ -13,115 +13,149 @@ public class EmailService {
     @Autowired
     private JavaMailSender mailSender;
 
+    private static final String BRAND_COLOR = "#1a1c1e";
+    private static final String ACCENT_EMERALD = "#10b981";
+
+    // --- LOGO REUSABLE EN PUR CSS (REPRODUIT LA GRILLE REACT) ---
+    private String getLogoHtml() {
+        return """
+            <div style="text-align: center; margin-bottom: 32px;">
+                <div style="display: inline-block; width: 64px; height: 64px; background-color: #1a1c1e; border-radius: 18px; padding: 14px; box-sizing: border-box; transform: rotate(3deg); -webkit-transform: rotate(3deg); -moz-transform: rotate(3deg); box-shadow: 0 10px 25px rgba(0,0,0,0.15);">
+                    <table border="0" cellpadding="0" cellspacing="4" style="width: 100%; height: 100%;">
+                        <tr>
+                            <td style="background-color: #10b981; border-radius: 4px; width: 50%; height: 50%;"></td>
+                            <td style="background-color: #ffffff; border-radius: 4px;"></td>
+                        </tr>
+                        <tr>
+                            <td style="background-color: #ffffff; border-radius: 4px;"></td>
+                            <td style="background-color: #ffffff; border-radius: 4px;"></td>
+                        </tr>
+                    </table>
+                </div>
+                <h1 style="color: #1a1c1e; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 26px; font-weight: 900; margin-top: 16px; margin-bottom: 0; letter-spacing: -1px;">UniCheck QR</h1>
+            </div>
+        """;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 1. ALERTE ABSENCE RE-DESIGNÉE
+    // ─────────────────────────────────────────────────────────────────────────
     public void envoyerAlerteAbsence(String toEmail, String nomEtudiant, String module, String nomProf, long nbAbsences) {
         try {
             MimeMessage message = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
 
             helper.setTo(toEmail);
-            helper.setSubject("⚠️ UniCheck : Alerte d'assiduité - " + module);
+            helper.setSubject("⚠️ UniCheck : Alerte d'assiduité critique — " + module);
 
-            // Template HTML inspiré de la Landing Page UniCheck
-            String htmlContent = "<div style=\"font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #fcfdfe; padding: 40px 20px; color: #4B5563;\">"
-                    + "<div style=\"max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 24px; padding: 40px; box-shadow: 0 10px 30px -5px rgba(0,0,0,0.05); border: 1px solid #f1f4f2;\">"
-                    
-                    // Header avec Logo "fait maison" en CSS
-                    + "<div style=\"text-align: center; margin-bottom: 30px;\">"
-                    + "<div style=\"display: inline-block; width: 40px; height: 40px; background-color: #006c49; border-radius: 12px; position: relative;\">"
-                    + "<div style=\"width: 10px; height: 10px; background-color: white; border-radius: 50%; position: absolute; top: 15px; left: 15px;\"></div>"
-                    + "</div>"
-                    + "<h1 style=\"color: #1a1c1e; font-size: 24px; font-weight: 800; margin-top: 15px; letter-spacing: -1px;\">Unicheck</h1>"
-                    + "</div>"
+            String htmlContent = """
+                <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; padding: 50px 20px; color: #334155;">
+                    <div style="max-width: 560px; margin: 0 auto; background-color: #ffffff; border-radius: 32px; padding: 40px; box-shadow: 0 20px 40px rgba(15, 23, 42, 0.04); border: 1px solid #f1f5f9;">
+                        
+                        """ + getLogoHtml() + """
+                        
+                        <div style="background-color: #fef2f2; border-left: 4px solid #ef4444; padding: 16px 20px; border-radius: 12px; margin-bottom: 32px; text-align: left;">
+                            <p style="color: #b91c1c; font-weight: 800; font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; margin: 0;">Seuil Critique Atteint</p>
+                        </div>
 
-                    // Corps du message
-                    + "<div style=\"background-color: #fff5f5; border-left: 4px solid #ef4444; padding: 15px 20px; border-radius: 8px; margin-bottom: 25px;\">"
-                    + "<p style=\"color: #b91c1c; font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin: 0;\">Alerte d'assiduité</p>"
-                    + "</div>"
+                        <h2 style="color: #1a1c1e; font-size: 22px; font-weight: 800; margin-top: 0; margin-bottom: 16px; letter-spacing: -0.5px;">Bonjour %s,</h2>
+                        <p style="font-size: 15px; line-height: 1.7; color: #475569; margin-bottom: 24px;">
+                            Le système automatisé d'assiduité a détecté une situation nécessitant votre attention immédiate pour le module <strong>%s</strong> (Enseigné par : <strong>%s</strong>).
+                        </p>
 
-                    + "<h2 style=\"color: #1a1c1e; font-size: 20px; font-weight: 700;\">Bonjour " + nomEtudiant + ",</h2>"
-                    + "<p style=\"font-size: 15px; line-height: 1.6; color: #4B5563;\">"
-                    + "Notre système a détecté que vous avez atteint <strong>" + nbAbsences + " absences</strong> pour le module <strong>" + module + "</strong> dispensé par <strong>" + nomProf + "</strong>."
-                    + "</p>"
-                    + "<p style=\"font-size: 15px; line-height: 1.6; color: #4B5563;\">"
-                    + "Ce niveau d'absence est critique et peut impacter la validation de votre semestre. Nous vous invitons à régulariser votre situation au plus vite en soumettant un justificatif via votre espace personnel ou en contactant l'administration."
-                    + "</p>"
+                        <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 20px; padding: 24px; text-align: center; margin-bottom: 32px;">
+                            <span style="font-size: 13px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 1px; display: block; margin-bottom: 4px;">Votre état actuel</span>
+                            <span style="font-size: 48px; font-weight: 900; color: #ef4444; line-height: 1;">%d</span>
+                            <span style="font-size: 15px; font-weight: 700; color: #ef4444; display: block; margin-top: 4px;">absences cumulées</span>
+                        </div>
 
-                    // Bouton d'action
-                    + "<div style=\"text-align: center; margin-top: 35px;\">"
-                    + "<a href=\"http://localhost:3000/connexion\" style=\"background-color: #1a1c1e; color: #ffffff; padding: 16px 32px; text-decoration: none; border-radius: 30px; font-weight: 700; font-size: 14px; display: inline-block;\">Accéder à mon espace</a>"
-                    + "</div>"
+                        <p style="font-size: 14px; line-height: 1.6; color: #64748b; margin-bottom: 32px; background-color: #fffbeb; border: 1px solid #fef3c7; pading: 12px; border-radius: 12px; padding: 16px;">
+                            💡 <strong>Rappel :</strong> Conformément au règlement intérieur, dépasser ce quota compromet directement la validation de votre semestre. Veuillez téléverser vos justificatifs médicaux ou administratifs depuis votre espace en ligne sans plus attendre.
+                        </p>
 
-                    // Footer
-                    + "<div style=\"margin-top: 40px; padding-top: 20px; border-top: 1px solid #f1f4f2; text-align: center;\">"
-                    + "<p style=\"color: #9ca3af; font-size: 11px; text-transform: uppercase; letter-spacing: 2px;\">© 2026 UniCheck • Designed for Excellence</p>"
-                    + "</div>"
+                        <div style="text-align: center;">
+                            <a href="http://localhost:3000/connexion" style="display: inline-block; background-color: #1a1c1e; color: #ffffff; padding: 18px 36px; text-decoration: none; border-radius: 24px; font-weight: 800; font-size: 15px; box-shadow: 0 10px 25px rgba(26,28,30,0.25); transition: all 0.2s ease;">Déposer un justificatif</a>
+                        </div>
 
-                    + "</div>"
-                    + "</div>";
+                        <div style="margin-top: 48px; padding-top: 24px; border-top: 1px solid #f1f5f9; text-align: center;">
+                            <p style="color: #94a3b8; font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; margin: 0;">© 2026 UniCheck • Notification d'Assiduité</p>
+                        </div>
+
+                    </div>
+                </div>
+            """.formatted(nomEtudiant, module, nomProf, nbAbsences);
 
             helper.setText(htmlContent, true);
             mailSender.send(message);
             System.out.println("📧 E-mail d'alerte envoyé avec succès à " + toEmail);
 
         } catch (MessagingException e) {
-            System.err.println("❌ Erreur lors de l'envoi de l'e-mail : " + e.getMessage());
+            System.err.println("❌ Erreur lors de l'envoi de l'e-mail d'alerte : " + e.getMessage());
         }
     }
-    // Dans EmailService.java
-public void envoyerMailBienvenue(String toEmail, String nomEtudiant) {
-    try {
-        MimeMessage message = mailSender.createMimeMessage();
-        MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
 
-        helper.setTo(toEmail);
-        helper.setSubject("🚀 Bienvenue sur UniCheck — Votre espace est prêt !");
+    // ─────────────────────────────────────────────────────────────────────────
+    // 2. BIENVENUE COMPTE ACTIVÉ (ÉTUDIANT ET PROFESSEUR)
+    // ─────────────────────────────────────────────────────────────────────────
+    public void envoyerMailBienvenue(String toEmail, String nomUtilisateur, String role) {
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
 
-        String htmlContent = 
-            "<div style=\"font-family: 'Inter', Helvetica, Arial, sans-serif; background-color: #fcfdfe; padding: 60px 20px; color: #1a1c1e;\">" +
-            "  <div style=\"max-width: 550px; margin: 0 auto; background-color: #ffffff; border-radius: 32px; padding: 48px; box-shadow: 0 20px 40px rgba(0,0,0,0.03); border: 1px solid #f1f5f9;\">" +
-            
-            "    <div style=\"text-align: center; margin-bottom: 40px;\">" +
-            "      <div style=\"display: inline-block; width: 48px; height: 48px; background-color: #006c49; border-radius: 14px; margin-bottom: 20px;\">" +
-            "        <div style=\"width: 12px; height: 12px; background-color: white; border-radius: 50%; margin: 18px auto;\"></div>" +
-            "      </div>" +
-            "      <h1 style=\"font-size: 28px; font-weight: 800; letter-spacing: -1px; margin: 0;\">UniCheck</h1>" +
-            "    </div>" +
+            helper.setTo(toEmail);
+            helper.setSubject("🚀 Bienvenue sur UniCheck — Votre espace " + role + " est opérationnel !");
 
-            "    <div style=\"text-align: center; margin-bottom: 32px;\">" +
-            "      <h2 style=\"font-size: 22px; font-weight: 700; color: #1a1c1e;\">Bonjour " + nomEtudiant + ",</h2>" +
-            "      <p style=\"font-size: 16px; line-height: 1.7; color: #64748b;\">" +
-            "        L'administration vient d'activer votre compte sur la nouvelle plateforme de gestion d'assiduité. " +
-            "        Désormais, votre présence est sécurisée, automatisée et consultable en temps réel." +
-            "      </p>" +
-            "    </div>" +
+            String specificDetails = role.equalsIgnoreCase("Enseignant") ? """
+                <li>Générez vos QR Codes dynamiques rafraîchis toutes les 5s</li>
+                <li>Suivez en direct le flux d'arrivée des étudiants</li>
+                <li>Validez et gérez l'historique des présences par groupe</li>
+                <li>Consultez les statistiques d'assiduité globales</li>
+            """ : """
+                <li>Scannez vos badges via QR Code de présence</li>
+                <li>Recevez des alertes d'absence instantanées par module</li>
+                <li>Justifiez vos absences directement depuis votre compte</li>
+                <li>Suivez votre feuille de présence consolidée</li>
+            """;
 
-            "    <div style=\"background-color: #f8fafc; border-radius: 24px; padding: 24px; margin-bottom: 32px;\">" +
-            "      <div style=\"display: flex; align-items: center; margin-bottom: 12px;\">" +
-            "        <span style=\"color: #006c49; font-weight: 800; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;\">Ce qui change pour vous :</span>" +
-            "      </div>" +
-            "      <ul style=\"margin: 0; padding-left: 20px; color: #475569; font-size: 14px; line-height: 2;\">" +
-            "        <li>Scannez votre badge via QR Code</li>" +
-            "        <li>Recevez des alertes d'absence instantanées</li>" +
-            "        <li>Justifiez vos absences directement en ligne</li>" +
-            "        <li>Suivez vos statistiques par module</li>" +
-            "      </ul>" +
-            "    </div>" +
+            String htmlContent = """
+                <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; padding: 50px 20px; color: #334155;">
+                    <div style="max-width: 560px; margin: 0 auto; background-color: #ffffff; border-radius: 32px; padding: 40px; box-shadow: 0 20px 40px rgba(15, 23, 42, 0.04); border: 1px solid #f1f5f9;">
+                        
+                        """ + getLogoHtml() + """
 
-            "    <div style=\"text-align: center;\">" +
-            "      <a href=\"http://localhost:3000\" style=\"display: inline-block; background-color: #1a1c1e; color: #ffffff; padding: 18px 36px; border-radius: 20px; text-decoration: none; font-weight: 700; font-size: 15px; box-shadow: 0 10px 20px rgba(0,0,0,0.1);\">Accéder à mon espace</a>" +
-            "    </div>" +
+                        <div style="text-align: center; margin-bottom: 32px;">
+                            <h2 style="color: #1a1c1e; font-size: 24px; font-weight: 800; margin-top: 0; margin-bottom: 12px; letter-spacing: -0.5px;">Bonjour %s,</h2>
+                            <p style="font-size: 16px; line-height: 1.7; color: #475569; margin: 0;">
+                                Votre compte <strong>%s</strong> a été initialisé avec succès sur notre plateforme de gestion d'assiduité nouvelle génération.
+                            </p>
+                        </div>
 
-            "    <p style=\"text-align: center; margin-top: 40px; font-size: 12px; color: #94a3b8; line-height: 1.6;\">" +
-            "      Ceci est un message automatique de test pour confirmer la configuration de votre compte.<br/>" +
-            "      © 2026 UniCheck • Excellence Académique" +
-            "    </p>" +
-            "  </div>" +
-            "</div>";
+                        <div style="background-color: #f8fafc; border-radius: 24px; padding: 24px; margin-bottom: 32px; border: 1px solid #e2e8f0;">
+                            <div style="margin-bottom: 14px;">
+                                <span style="color: #10b981; font-weight: 800; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Au programme sur votre espace :</span>
+                            </div>
+                            <ul style="margin: 0; padding-left: 20px; color: #334155; font-size: 14px; line-height: 2.1;">
+                                %s
+                            </ul>
+                        </div>
 
-        helper.setText(htmlContent, true);
-        mailSender.send(message);
-    } catch (Exception e) {
-        System.err.println("Erreur mail : " + e.getMessage());
+                        <div style="text-align: center; margin-bottom: 16px;">
+                            <a href="http://localhost:3000/connexion" style="display: inline-block; background-color: #1a1c1e; color: #ffffff; padding: 18px 44px; border-radius: 24px; text-decoration: none; font-weight: 800; font-size: 15px; box-shadow: 0 10px 25px rgba(26,28,30,0.25);">Accéder à mon espace</a>
+                        </div>
+
+                        <div style="margin-top: 48px; padding-top: 24px; border-top: 1px solid #f1f5f9; text-align: center;">
+                            <p style="color: #94a3b8; font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; margin: 0;">© 2026 UniCheck • Excellence Académique</p>
+                        </div>
+
+                    </div>
+                </div>
+            """.formatted(nomUtilisateur, role, specificDetails);
+
+            helper.setText(htmlContent, true);
+            mailSender.send(message);
+            System.out.println("🚀 Mail de bienvenue envoyé avec succès à " + toEmail + " (" + role + ")");
+        } catch (Exception e) {
+            System.err.println("❌ Erreur lors de l'envoi du mail de bienvenue : " + e.getMessage());
+        }
     }
-}
 }
