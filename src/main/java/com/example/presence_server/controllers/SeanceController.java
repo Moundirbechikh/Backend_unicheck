@@ -97,6 +97,35 @@ public class SeanceController {
         return etudiantsConcernes;
     }
 
+// À ajouter ou adapter dans ton SeanceController.java
+@GetMapping("/{id}/capacite")
+public ResponseEntity<Map<String, Object>> getCapaciteGroupe(@PathVariable Long id) {
+    Optional<Seance> seanceOpt = seanceRepository.findById(id);
+    if (!seanceOpt.isPresent()) {
+        return ResponseEntity.notFound().build();
+    }
+    
+    Seance seance = seanceOpt.get();
+    
+    // Supposons que ta classe Seance possède une relation vers un objet Groupe
+    // et que ce Groupe possède la liste des étudiants inscrits.
+    int totalEtudiants = 0;
+    if (seance.getGroupe() != null && seance.getGroupe().getEtudiants() != null) {
+        totalEtudiants = seance.getGroupe().getEtudiants().size();
+    }
+    
+    // Alternative si tu passes par un EtudiantRepository personnalisé :
+    // int totalEtudiants = etudiantRepository.countByGroupeId(seance.getGroupe().getId());
+
+    Map<String, Object> response = new HashMap<>();
+    response.put("seanceId", id);
+    response.put("totalEtudiants", totalEtudiants);
+    response.put("groupeNom", seance.getGroupe() != null ? seance.getGroupe().getNom() : "N/A");
+
+    return ResponseEntity.ok(response);
+}
+
+
 // ─────────────────────────────────────────────────────────────────────────
 // GET /api/seances/prochain/{profId}
 // Retourne la séance active OU la prochaine séance à venir du prof
