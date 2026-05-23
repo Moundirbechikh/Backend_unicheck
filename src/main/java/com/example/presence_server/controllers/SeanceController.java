@@ -2,7 +2,7 @@ package com.example.presence_server.controllers;
 
 import com.example.presence_server.models.*;
 import com.example.presence_server.repositories.*;
-import com.example.presence_server.services.EmailService; // <--- L'IMPORT QUI MANQUAIT EST ICI
+import com.example.presence_server.services.EmailService;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -25,7 +25,7 @@ public class SeanceController {
     @Autowired private NotificationRepository notificationRepository;
     @Autowired private EtudiantRepository    etudiantRepository;
     @Autowired private PresenceRepository    presenceRepository;
-    @Autowired private EmailService          emailService; // L'injection de ton service d'email
+    @Autowired private EmailService          emailService;
 
     // ── Token aléatoire ──────────────────────────────────────────────────────
     private String generateRandomToken() {
@@ -61,12 +61,9 @@ public class SeanceController {
         notificationRepository.save(n);
     }
 
-    // ── HELPER : Trouver les étudiants (La même logique que le Dashboard) ────
-    // Le dashboard affiche les séances où le groupe de la séance CONTIENT la spécialité de l'étudiant.
-    // Donc, pour notifier les bons étudiants, on récupère TOUS les étudiants,
-    // et on filtre ceux dont la spécialité est contenue dans le champ 'groupe' de la séance.
+    // ── HELPER : Trouver les étudiants (Corrigé pour matcher Spécialité ET Groupe) ────
     private List<Etudiant> getEtudiantsConcerneParSeance(Seance seance) {
-        String groupeSeance = seance.getGroupe();
+        String groupeSeance = seance.getGroupe(); // ex: "SITW G1"
         if (groupeSeance == null || groupeSeance.isBlank()) {
             return new ArrayList<>();
         }
@@ -74,13 +71,25 @@ public class SeanceController {
         List<Etudiant> tousLesEtudiants = etudiantRepository.findAll();
         List<Etudiant> etudiantsConcernes = new ArrayList<>();
         
+        String groupeSeanceLower = groupeSeance.toLowerCase();
+
         for (Etudiant etudiant : tousLesEtudiants) {
-            String specialiteEtudiant = etudiant.getSpecialite();
-            if (specialiteEtudiant != null && !specialiteEtudiant.isBlank()) {
-                // Si la spécialité de l'étudiant est dans le nom du groupe de la séance (ex: "SITW" dans "SITW G1")
-                // OU si le groupe de la séance est dans la spécialité de l'étudiant (plus rare)
-                if (groupeSeance.toLowerCase().contains(specialiteEtudiant.toLowerCase()) || 
-                    specialiteEtudiant.toLowerCase().contains(groupeSeance.toLowerCase())) {
+            String spe = etudiant.getSpecialite() != null ? etudiant.getSpecialite().toLowerCase() : "";
+            String grp = etudiant.getGroupe() != null ? etudiant.getGroupe().toLowerCase() : "";
+
+            if (!spe.isBlank()) {
+                // 1. On vérifie que la spécialité correspond (ex: "sitw" est dans "sitw g1")
+                boolean matchSpe = groupeSeanceLower.contains(spe) || spe.contains(groupeSeanceLower);
+                
+                // 2. On vérifie que le groupe exact de l'étudiant est concerné (ex: "g1" est dans "sitw g1")
+                // S'il n'a pas de groupe, on part du principe qu'il est concerné (matchGrp = true par défaut)
+                boolean matchGrp = true;
+                if (!grp.isBlank()) {
+                    matchGrp = groupeSeanceLower.contains(grp);
+                }
+                
+                // S'il coche les 2 conditions, on le compte !
+                if (matchSpe && matchGrp) {
                     etudiantsConcernes.add(etudiant);
                 }
             }
@@ -91,7 +100,6 @@ public class SeanceController {
 // ─────────────────────────────────────────────────────────────────────────
 // GET /api/seances/prochain/{profId}
 // Retourne la séance active OU la prochaine séance à venir du prof
-// Retourne aussi les infos cours et salle pour le frontend
 // ─────────────────────────────────────────────────────────────────────────
 @GetMapping("/prochain/{profId}")
 public ResponseEntity<?> getProchainCours(@PathVariable Long profId) {
@@ -108,7 +116,6 @@ public ResponseEntity<?> getProchainCours(@PathVariable Long profId) {
     List<Seance> prochainesSeances = seanceRepository
             .findByProfesseur_IdAndEstTermineeFalseAndEstActiveFalseAndDateHeureDebutAfterOrderByDateHeureDebutAsc(
                     profId, maintenant);
-
     if (!prochainesSeances.isEmpty()) {
         return ResponseEntity.ok(formatSeancePourDashboard(prochainesSeances.get(0)));
     }
@@ -137,6 +144,9 @@ private Map<String, Object> formatSeancePourDashboard(Seance s) {
     dto.put("estActive",      s.isEstActive());
     dto.put("estTerminee",    s.isEstTerminee());
     dto.put("numeroSeance",   s.getNumeroSeance());
+    
+    // 💡 NOUVEAU : On injecte la capacité totale calculée dynamiquement !
+    dto.put("totalAttendus",  getEtudiantsConcerneParSeance(s).size());
 
     // Cours
     if (s.getCours() != null) {
@@ -168,7 +178,6 @@ private Map<String, Object> formatSeancePourDashboard(Seance s) {
 
     // ─────────────────────────────────────────────────────────────────────────
     // PUT /api/seances/{id}/lancer
-    // Lance la séance + envoie une notification
     // ─────────────────────────────────────────────────────────────────────────
 @PutMapping("/{id}/lancer")
 @Transactional
@@ -180,7 +189,7 @@ public ResponseEntity<?> lancerSeance(
 
         if (seance.isEstTerminee()) {
             return ResponseEntity.badRequest()
-                    .body(Map.of("error", "Cette séance est déjà terminée."));
+                  .body(Map.of("error", "Cette séance est déjà terminée."));
         }
 
         LocalDateTime now = LocalDateTime.now();
@@ -190,8 +199,8 @@ public ResponseEntity<?> lancerSeance(
         seance.setDateHeureDebut(now);
         seance.setDateHeureLancement(now);
         seance.setCurrentToken(generateRandomToken());
-        seance.setTokenLastRefreshedAt(now);   // ← SYNC TIMER
-        seance.setPausedElapsedMs(0L);          // ← RESET ELAPSED
+        seance.setTokenLastRefreshedAt(now); 
+        seance.setPausedElapsedMs(0L);
 
         if (localisation.containsKey("lat") && localisation.containsKey("lng")) {
             seance.setProfLat(localisation.get("lat"));
@@ -199,16 +208,16 @@ public ResponseEntity<?> lancerSeance(
         }
 
         Seance saved = seanceRepository.saveAndFlush(seance);
-
         try {
-            String module  = seance.getCours()      != null ? seance.getCours().getLibelle() : "Module inconnu";
+            String module  = seance.getCours()      != null ?
+                seance.getCours().getLibelle() : "Module inconnu";
             String profNom = seance.getProfesseur() != null
                     ? "Prof. " + seance.getProfesseur().getPrenom() + " " + seance.getProfesseur().getNom()
                     : "votre professeur";
             String heure   = now.format(DateTimeFormatter.ofPattern("HH:mm"));
             String titre   = "📚 Séance lancée — " + module;
             String message = "La séance de " + module + " vient d'être lancée par " + profNom + " à " + heure + ".";
-
+            
             List<Etudiant> etudiants = getEtudiantsConcerneParSeance(seance);
             for (Etudiant e : etudiants) {
                 envoyerNotif(e, saved.getId(), "LANCEMENT", titre, message, "VERT");
@@ -222,7 +231,6 @@ public ResponseEntity<?> lancerSeance(
     }).orElse(ResponseEntity.notFound().build());
 }
 
-
 @GetMapping("/{id}/session-state")
 public ResponseEntity<?> getSessionState(@PathVariable Long id) {
     return seanceRepository.findById(id).map(seance -> {
@@ -230,10 +238,9 @@ public ResponseEntity<?> getSessionState(@PathVariable Long id) {
 
         long elapsedMs;
         if (seance.isTimerPaused()) {
-            // En pause : retourner le temps figé au moment de la pause
             elapsedMs = seance.getPausedElapsedMs() != null ? seance.getPausedElapsedMs() : 0L;
-        } else if (seance.getTokenLastRefreshedAt() != null) {
-            // En cours : calculer depuis le dernier refresh token
+        } else if (seance.getTokenLastRefreshedAt() != null) 
+        {
             elapsedMs = java.time.Duration.between(
                     seance.getTokenLastRefreshedAt(), now).toMillis();
         } else {
@@ -243,18 +250,19 @@ public ResponseEntity<?> getSessionState(@PathVariable Long id) {
         Map<String, Object> state = new HashMap<>();
         state.put("token",         seance.getCurrentToken() != null ? seance.getCurrentToken() : "");
         state.put("isTimerPaused", seance.isTimerPaused());
-        state.put("elapsedMs",     Math.min(elapsedMs, 10500L)); // cap à 10.5s
+        state.put("elapsedMs",     Math.min(elapsedMs, 10500L));
         state.put("estActive",     seance.isEstActive());
         state.put("estTerminee",   seance.isEstTerminee());
+        
+        // 💡 NOUVEAU : Injecté ici aussi pour la mise à jour en temps réel !
+        state.put("totalAttendus", getEtudiantsConcerneParSeance(seance).size());
 
         return ResponseEntity.ok(state);
     }).orElse(ResponseEntity.notFound().build());
 }
 
-
     // ─────────────────────────────────────────────────────────────────────────
     // PUT /api/seances/{id}/terminer
-    // Termine la séance + supprime notifs lancement + envoie notifs de fin
     // ─────────────────────────────────────────────────────────────────────────
 @PutMapping("/{id}/terminer")
 @Transactional
@@ -274,8 +282,10 @@ public ResponseEntity<?> terminerSeance(@PathVariable Long id) {
 
         // ── Recycling + Notifications en ASYNCHRONE (ne bloque plus) ─────
         final Long   seanceId   = seance.getId();
-        final String module     = seance.getCours()      != null ? seance.getCours().getLibelle() : "Module inconnu";
-        final Long   coursId    = seance.getCours()      != null ? seance.getCours().getId()       : null;
+        final String module     = seance.getCours()      != null ?
+                seance.getCours().getLibelle() : "Module inconnu";
+        final Long   coursId    = seance.getCours()      != null ?
+                seance.getCours().getId()       : null;
         final String profNom    = seance.getProfesseur() != null
                 ? "Prof. " + seance.getProfesseur().getPrenom() + " " + seance.getProfesseur().getNom()
                 : "votre professeur";
@@ -327,14 +337,13 @@ public ResponseEntity<?> terminerSeance(@PathVariable Long id) {
             // ── Notifications de fin ──────────────────────────────────────
             try {
                 notificationRepository.deleteBySeanceIdAndTypeNotification(seanceId, "LANCEMENT");
-
                 List<Etudiant> etudiants = getEtudiantsConcerneParSeance(seanceSnapshot);
                 for (Etudiant e : etudiants) {
                     long absences = 0;
                     if (coursId != null) {
                         long total = seanceRepository
                                 .countByCours_IdAndGroupeAndEstTermineeTrue(
-                                        coursId, seanceSnapshot.getGroupe());
+                                    coursId, seanceSnapshot.getGroupe());
                         long presences = presenceRepository
                                 .countByEtudiant_IdAndSeance_Cours_IdAndStatutPresence(
                                         e.getId(), coursId, "PRESENT");
@@ -356,7 +365,6 @@ public ResponseEntity<?> terminerSeance(@PathVariable Long id) {
                                 + (absences >= 4 ? " Taux critique."
                                    : absences >= 2 ? " Régularisez votre assiduité."
                                    : " Justificatif si nécessaire.");
-
                         if (absences == 4 && e.getEmail() != null && !e.getEmail().isBlank()) {
                             emailService.envoyerAlerteAbsence(
                                     e.getEmail(),
@@ -374,12 +382,8 @@ public ResponseEntity<?> terminerSeance(@PathVariable Long id) {
 
         // ── Réponse immédiate sans attendre l'async ───────────────────────
         return ResponseEntity.ok(Map.of("status", "success", "message", "Séance terminée."));
-
     }).orElse(ResponseEntity.notFound().build());
 }
-    // ─────────────────────────────────────────────────────────────────────────
-    // Autres endpoints
-    // ─────────────────────────────────────────────────────────────────────────
 
 @PutMapping("/{id}/toggle-timer")
 @Transactional
@@ -389,16 +393,13 @@ public ResponseEntity<Map<String, Object>> toggleTimer(@PathVariable Long id) {
         boolean       newPaused = !seance.isTimerPaused();
 
         if (newPaused) {
-            // ── Mise en PAUSE : sauvegarder l'elapsed actuel ─────────────────
             long elapsed = seance.getTokenLastRefreshedAt() != null
                     ? java.time.Duration.between(seance.getTokenLastRefreshedAt(), now).toMillis()
                     : 0L;
             seance.setPausedElapsedMs(Math.min(elapsed, 10000L));
         } else {
-            // ── REPRISE : recalculer tokenLastRefreshedAt pour que l'elapsed
-            //    continue depuis le bon endroit ──────────────────────────────
-            long pausedMs = seance.getPausedElapsedMs() != null ? seance.getPausedElapsedMs() : 0L;
-            // tokenLastRefreshedAt = now - pausedElapsedMs
+            long pausedMs = seance.getPausedElapsedMs() != null ?
+                seance.getPausedElapsedMs() : 0L;
             seance.setTokenLastRefreshedAt(now.minusNanos(pausedMs * 1_000_000L));
         }
 
@@ -424,10 +425,7 @@ public ResponseEntity<List<Map<String, Object>>> getSeancesByDate(
         @PathVariable Long profId,
         @RequestParam("date") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
 
-    // Utilisation de la nouvelle méthode du repository qui filtre directement par date
     List<Seance> toutes = seanceRepository.findByProfAndDatePlanifiee(profId, date);
-
-    // Transformation en DTO pour l'affichage dans l'agenda
     return ResponseEntity.ok(toutes.stream()
             .map(this::formatSeancePourAgenda)
             .collect(Collectors.toList()));
@@ -442,8 +440,6 @@ public ResponseEntity<?> refreshToken(@PathVariable Long id) {
         if (seance.isEstTerminee())
             return ResponseEntity.badRequest().body(Map.of("error", "Séance terminée."));
 
-        // ── Protection race condition multi-device ────────────────────────────
-        // Si le token vient d'être rafraîchi il y a moins de 8s → renvoyer le token actuel
         if (seance.getTokenLastRefreshedAt() != null) {
             long elapsed = java.time.Duration.between(
                     seance.getTokenLastRefreshedAt(), LocalDateTime.now()).toMillis();
@@ -452,7 +448,6 @@ public ResponseEntity<?> refreshToken(@PathVariable Long id) {
             }
         }
 
-        // ── Générer et sauvegarder le nouveau token ───────────────────────────
         LocalDateTime now = LocalDateTime.now();
         seance.setCurrentToken(generateRandomToken());
         seance.setTokenLastRefreshedAt(now);
@@ -474,16 +469,14 @@ public ResponseEntity<?> refreshToken(@PathVariable Long id) {
         List<Seance> seances = seanceRepository
                 .findByGroupeContainingIgnoreCaseAndDateHeureDebutBetweenOrderByDateHeureDebutAsc(
                         specialite, start, end);
-
         List<Map<String, Object>> result = seances.stream()
                 .map(this::formatSeancePourAgenda)
                 .collect(Collectors.toList());
-
         return ResponseEntity.ok(result);
     }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Helper commun : DTO propre pour les agendas (dates en ISO string, pas de ref circulaire)
+// Helper commun : DTO propre pour les agendas (dates en ISO string)
 // ─────────────────────────────────────────────────────────────────────────
 private Map<String, Object> formatSeancePourAgenda(Seance s) {
     Map<String, Object> dto = new HashMap<>();
@@ -498,16 +491,14 @@ private Map<String, Object> formatSeancePourAgenda(Seance s) {
     dto.put("numeroSeance",s.getNumeroSeance());
     dto.put("datePlanifiee", s.getDatePlanifiee() != null
         ? s.getDatePlanifiee().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME) : null);
-dto.put("dateHeureLancement", s.getDateHeureLancement() != null
+    dto.put("dateHeureLancement", s.getDateHeureLancement() != null
         ? s.getDateHeureLancement().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME) : null);
-
-    // Dates en ISO string pour que JavaScript les parse correctement
     dto.put("dateHeureDebut", s.getDateHeureDebut() != null
             ? s.getDateHeureDebut().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME) : null);
     dto.put("dateHeureFin",   s.getDateHeureFin() != null
             ? s.getDateHeureFin().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)   : null);
-
-    // Cours (sans relations circulaires)
+    
+    // Cours
     if (s.getCours() != null) {
         Map<String, Object> coursDto = new HashMap<>();
         coursDto.put("id",         s.getCours().getId());
@@ -516,7 +507,7 @@ dto.put("dateHeureLancement", s.getDateHeureLancement() != null
         dto.put("cours", coursDto);
     }
 
-    // Professeur (sans coursEnseignes)
+    // Professeur
     if (s.getProfesseur() != null) {
         Map<String, Object> profDto = new HashMap<>();
         profDto.put("id",     s.getProfesseur().getId());
