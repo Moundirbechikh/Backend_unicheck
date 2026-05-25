@@ -15,29 +15,28 @@ public class EmailService {
 
     private final String EXPEDITEUR_AUTORISE = "unickeckalerte@gmail.com";
 
-    // Logo compact inspiré du site (HTML inline compatible email)
+    // Logo compact : carré vert avec point blanc + texte UniCheck QR (UniCheck en noir)
     private String getLogoHtml() {
         return """
-            <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto 18px; text-align:center;">
+            <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto 14px; text-align:center;">
               <tr>
                 <td style="vertical-align:middle;">
-                  <div style="display:inline-block; text-align:center;">
-                    <div style="width:56px; height:56px; background:#0f172a; border-radius:14px; display:inline-flex; align-items:center; justify-content:center; transform:rotate(3deg); box-shadow:0 10px 20px rgba(15,23,42,0.12);">
-                      <table role="presentation" cellpadding="0" cellspacing="0" style="width:30px; height:30px;">
-                        <tr>
-                          <td style="background:#10b981; width:12px; height:12px; border-radius:3px;"></td>
-                          <td style="background:#ffffff; width:12px; height:12px; border-radius:3px;"></td>
-                        </tr>
-                        <tr>
-                          <td style="background:#ffffff; width:12px; height:12px; border-radius:3px;"></td>
-                          <td style="background:#ffffff; width:12px; height:12px; border-radius:3px;"></td>
-                        </tr>
-                      </table>
-                    </div>
-                    <div style="font-family:Manrope, 'Outfit', Inter, -apple-system, sans-serif; font-weight:800; font-size:18px; color:#0f172a; margin-top:8px;">
-                      <span style="letter-spacing:-0.3px;">UniCheck</span><span style="color:#10b981; font-weight:900;"> QR</span>
-                    </div>
-                  </div>
+                  <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
+                    <tr>
+                      <td style="vertical-align:middle; padding-right:10px;">
+                        <!-- carré vert avec point blanc -->
+                        <div style="width:36px; height:36px; background:#006c49; border-radius:10px; display:inline-block; vertical-align:middle; text-align:center; line-height:36px;">
+                          <div style="width:6px; height:6px; background:#ffffff; border-radius:50%; margin:0 auto;"></div>
+                        </div>
+                      </td>
+                      <td style="vertical-align:middle;">
+                        <!-- texte du logo : UniCheck (noir) + QR -->
+                        <div style="font-family:Manrope, 'Outfit', Inter, -apple-system, sans-serif; font-weight:800; font-size:18px; color:#0f172a; line-height:1;">
+                          <span style="color:#0f172a;">UniCheck</span><span style="color:#0f172a; font-weight:900;"> QR</span>
+                        </div>
+                      </td>
+                    </tr>
+                  </table>
                 </td>
               </tr>
             </table>
@@ -167,7 +166,7 @@ public class EmailService {
         }
     }
 
-    // 2. BIENVENUE
+    // 2. BIENVENUE (simplifié : message unique, pas de listes d'icônes)
     public void envoyerMailBienvenue(String toEmail, String nomUtilisateur, String role) {
         System.out.println("📧 [EMAIL] Tentative envoi bienvenue → " + toEmail + " (" + role + ")");
         try {
@@ -177,21 +176,6 @@ public class EmailService {
             helper.setFrom(EXPEDITEUR_AUTORISE);
             helper.setTo(toEmail);
             helper.setSubject("🚀 Bienvenue sur UniCheck !");
-
-            boolean isProf = role.equalsIgnoreCase("Enseignant");
-            String features = isProf
-                ? """
-                    <li style="margin-bottom:10px;">📊 Générez vos QR Codes dynamiques</li>
-                    <li style="margin-bottom:10px;">👁 Suivez en direct l'arrivée de vos étudiants</li>
-                    <li style="margin-bottom:10px;">📋 Gérez l'historique des présences</li>
-                    <li style="margin-bottom:0;">📈 Consultez les statistiques globales</li>
-                  """
-                : """
-                    <li style="margin-bottom:10px;">📱 Scannez le QR Code de votre professeur</li>
-                    <li style="margin-bottom:10px;">🔔 Recevez des alertes d'absence</li>
-                    <li style="margin-bottom:10px;">📄 Justifiez vos absences via l'app</li>
-                    <li style="margin-bottom:0;">📊 Suivez votre feuille de présence</li>
-                  """;
 
             String header = statusPill("Espace activé", "#ecfdf5", "#059669");
 
@@ -203,15 +187,9 @@ public class EmailService {
                 </h2>
 
                 <p style="font-family:Inter, Arial, sans-serif; color:#475569; font-size:15px; line-height:1.6; text-align:center; margin:0 0 16px;">
-                  Votre compte est officiellement opérationnel. Voici ce que vous pouvez faire dès maintenant :
+                  Votre compte est désormais actif. Vous pouvez vous connecter pour accéder à votre espace et commencer à utiliser UniCheck QR.
                 </p>
-
-                <div style="background:#f8fafc; border-radius:14px; padding:16px; border:1px solid #e6eef6; margin-bottom:12px;">
-                  <ul style="margin:0; padding-left:18px; color:#334155; font-size:14px; line-height:1.6; font-weight:600;">
-                    %s
-                  </ul>
-                </div>
-                """.formatted(header, nomUtilisateur, features);
+                """.formatted(header, nomUtilisateur);
 
             body += btnHtml("Accéder à mon espace", "https://unicheck-drab.vercel.app/connexion");
 
