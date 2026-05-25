@@ -17,16 +17,17 @@ public class EmailService {
     private final String URL_CONNEXION = "https://unicheck-drab.vercel.app/connexion";
 
     // ── NOUVEAU LOGO : Cercle vert avec point blanc central ──────────────
+// ── LOGO REUSABLE EN PUR CSS (Carré vert avec border-radius et point blanc central) ──
     private String getLogoHtml() {
         return """
             <table role="presentation" cellpadding="0" cellspacing="0" style="margin: 0 auto; text-align: center;">
               <tr>
                 <td align="center" style="padding-bottom: 12px;">
-                  <div style="display: inline-block; width: 48px; height: 48px; background-color: #006c49; border-radius: 50%; vertical-align: middle;">
+                  <div style="display: inline-block; width: 48px; height: 48px; background-color: #006c49; border-radius: 14px; vertical-align: middle; box-shadow: 0 10px 25px rgba(0,108,73,0.15);">
                     <table role="presentation" border="0" cellpadding="0" cellspacing="0" style="width: 100%; height: 100%;">
                       <tr>
                         <td align="center" valign="middle">
-                          <div style="width: 14px; height: 14px; background-color: #ffffff; border-radius: 50%;"></div>
+                          <div style="width: 12px; height: 12px; background-color: #ffffff; border-radius: 50%;"></div>
                         </td>
                       </tr>
                     </table>
