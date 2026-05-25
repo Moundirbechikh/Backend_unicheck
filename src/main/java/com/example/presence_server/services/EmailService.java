@@ -13,6 +13,9 @@ public class EmailService {
     @Autowired
     private JavaMailSender mailSender;
 
+    // ── L'adresse expéditeur autorisée sur Brevo ──────────────────────────────
+    private final String EXPEDITEUR_AUTORISE = "unickeckalerte@gmail.com";
+
     // ── Logo identique à l'app (carré noir incliné + grille) ─────────────────
     private String getLogoHtml() {
         return """
@@ -75,20 +78,17 @@ public class EmailService {
                                 border-radius:32px; overflow:hidden;
                                 box-shadow:0 20px 60px rgba(26,28,30,0.08);
                                 border:1px solid #e8ece9;">
-                    <!-- Header vert -->
                     <tr>
                       <td style="background:#1a1c1e; padding:36px 40px 32px;
                                  text-align:center;">
                         %s
                       </td>
                     </tr>
-                    <!-- Corps -->
                     <tr>
                       <td style="padding:40px 40px 36px;">
                         %s
                       </td>
                     </tr>
-                    <!-- Footer -->
                     <tr>
                       <td style="background:#f1f4f2; padding:20px 40px;
                                  text-align:center; border-top:1px solid #e8ece9;">
@@ -133,11 +133,14 @@ public class EmailService {
         try {
             MimeMessage msg = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(msg, true, "UTF-8");
+            
+            // 💡 CORRECTION ICI : Définition explicite de l'expéditeur
+            helper.setFrom(EXPEDITEUR_AUTORISE);
+            
             helper.setTo(toEmail);
             helper.setSubject("⚠️ UniCheck — Alerte assiduité : " + module);
 
             String body = """
-                <!-- Badge alerte -->
                 <div style="background:#fef2f2; border-left:4px solid #ef4444;
                             padding:14px 18px; border-radius:12px; margin-bottom:28px;">
                   <p style="margin:0; color:#b91c1c; font-size:11px;
@@ -156,7 +159,6 @@ public class EmailService {
                   (enseigné par <strong style="color:#1a1c1e;">%s</strong>).
                 </p>
 
-                <!-- Compteur absences -->
                 <div style="background:#f1f4f2; border-radius:20px;
                             padding:28px; text-align:center; margin-bottom:28px;
                             border:1px solid #e8ece9;">
@@ -169,7 +171,6 @@ public class EmailService {
                   </p>
                 </div>
 
-                <!-- Rappel réglementaire -->
                 <div style="background:#fffbeb; border:1px solid #fef3c7;
                             border-radius:14px; padding:16px 18px;
                             margin-bottom:8px;">
@@ -204,6 +205,10 @@ public class EmailService {
         try {
             MimeMessage msg = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(msg, true, "UTF-8");
+            
+            // 💡 CORRECTION ICI : Définition explicite de l'expéditeur
+            helper.setFrom(EXPEDITEUR_AUTORISE);
+            
             helper.setTo(toEmail);
             helper.setSubject("🚀 Bienvenue sur UniCheck — Espace " + role + " activé !");
 
@@ -223,7 +228,6 @@ public class EmailService {
                   """;
 
             String body = """
-                <!-- Badge rôle -->
                 <div style="text-align:center; margin-bottom:28px;">
                   <span style="display:inline-block; background:#d1f4e0;
                                color:#006c49; font-size:11px; font-weight:800;
@@ -243,7 +247,6 @@ public class EmailService {
                   est opérationnel sur UniCheck QR.
                 </p>
 
-                <!-- Fonctionnalités -->
                 <div style="background:#f1f4f2; border-radius:20px;
                             padding:24px 28px; border:1px solid #e8ece9;">
                   <p style="margin:0 0 14px; font-size:11px; font-weight:800;
@@ -279,11 +282,14 @@ public class EmailService {
         try {
             MimeMessage msg = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(msg, true, "UTF-8");
+            
+            // 💡 CORRECTION ICI : Définition explicite de l'expéditeur
+            helper.setFrom(EXPEDITEUR_AUTORISE);
+            
             helper.setTo(toEmail);
             helper.setSubject("📅 UniCheck Planning — " + sujet);
 
             String body = """
-                <!-- Badge planning -->
                 <div style="text-align:center; margin-bottom:28px;">
                   <span style="display:inline-block; background:#e0f2fe;
                                color:#0369a1; font-size:11px; font-weight:800;
