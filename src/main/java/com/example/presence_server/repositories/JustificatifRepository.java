@@ -25,5 +25,6 @@ public interface JustificatifRepository extends JpaRepository<Justificatif, Long
     List<Justificatif> findBySeance_Professeur_IdAndStatutValidation(
             Long professeurId, String statut);
 
+long countByStatutValidation(String statut);
     long countBySeance_Professeur_IdAndStatutValidation(Long professeurId, String statut);
 }

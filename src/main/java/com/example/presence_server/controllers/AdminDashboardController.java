@@ -23,7 +23,174 @@ public class AdminDashboardController {
     @Autowired private ProfesseurRepository professeurRepository;
     @Autowired private SeanceRepository seanceRepository;
     @Autowired private PresenceRepository presenceRepository;
+    @Autowired private JustificatifRepository justificatifRepository;
 
+
+// Helper réutilisé depuis SeanceController — copier la même logique
+private List<Etudiant> getEtudiantsConcerneParSeance(Seance seance) {
+    String groupeSeance = seance.getGroupe();
+    if (groupeSeance == null || groupeSeance.isBlank()) return new ArrayList<>();
+    List<Etudiant> tousLesEtudiants = etudiantRepository.findAll();
+    List<Etudiant> result = new ArrayList<>();
+    String gl = groupeSeance.toLowerCase();
+    for (Etudiant e : tousLesEtudiants) {
+        String spe = e.getSpecialite() != null ? e.getSpecialite().toLowerCase() : "";
+        String grp = e.getGroupe() != null ? e.getGroupe().toLowerCase() : "";
+        if (!spe.isBlank() && (gl.contains(spe) || spe.contains(gl))) {
+            boolean matchGrp = grp.isBlank() || gl.contains(grp);
+            if (matchGrp) result.add(e);
+        }
+    }
+    return result;
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────
+// GET /api/admin/dashboard/insights
+// Calcule les 3 types d'insights en temps réel
+// ─────────────────────────────────────────────────────────────────────────
+@GetMapping("/dashboard/insights")
+public ResponseEntity<List<Map<String, Object>>> getInsights() {
+    List<Map<String, Object>> insights = new ArrayList<>();
+
+    LocalDateTime now         = LocalDateTime.now();
+    LocalDateTime debutSemaine = now.minusDays(7);
+    LocalDateTime debutMois   = now.minusDays(30);
+
+    // ── 1. GROUPES : détection hausse / baisse cette semaine ─────────────
+    try {
+        List<Seance> seancesSemaine = seanceRepository
+                .findByDateHeureDebutBetween(debutSemaine, now).stream()
+                .filter(Seance::isEstTerminee)
+                .collect(Collectors.toList());
+
+        // Grouper les séances par groupe
+        Map<String, List<Seance>> parGroupe = new LinkedHashMap<>();
+        for (Seance s : seancesSemaine) {
+            if (s.getGroupe() == null) continue;
+            parGroupe.computeIfAbsent(s.getGroupe(), k -> new ArrayList<>()).add(s);
+        }
+
+        double globalMin = 100.0;
+        double globalMax = 0.0;
+        String groupeMin = null, groupeMax = null;
+
+        for (Map.Entry<String, List<Seance>> entry : parGroupe.entrySet()) {
+            List<Seance> seances = entry.getValue();
+            if (seances.isEmpty()) continue;
+
+            // Compter étudiants attendus pour ce groupe
+            Seance firstS = seances.get(0);
+            List<Etudiant> attendus = getEtudiantsConcerneParSeance(firstS);
+            if (attendus.isEmpty()) continue;
+
+            long totalAttendus = (long) attendus.size() * seances.size();
+            long totalPresents = 0;
+            for (Seance s : seances) {
+                totalPresents += presenceRepository.findBySeance_Id(s.getId())
+                        .stream().filter(p -> "PRESENT".equals(p.getStatutPresence())).count();
+            }
+
+            double pct = totalAttendus > 0
+                    ? Math.round(((double) totalPresents / totalAttendus) * 100.0) : 0;
+
+            if (pct < globalMin) { globalMin = pct; groupeMin = entry.getKey(); }
+            if (pct > globalMax) { globalMax = pct; groupeMax = entry.getKey(); }
+        }
+
+        // Insight baisse
+        if (groupeMin != null) {
+            Map<String, Object> i = new LinkedHashMap<>();
+            i.put("type",   "baisse");
+            i.put("icon",   "TrendingDown");
+            i.put("titre",  "Baisse de présence — " + groupeMin);
+            i.put("body",   "Le groupe " + groupeMin + " affiche " + (long) globalMin + "% de présence cette semaine.");
+            i.put("pct",    (long) globalMin);
+            insights.add(i);
+        }
+
+        // Insight hausse
+        if (groupeMax != null) {
+            Map<String, Object> i = new LinkedHashMap<>();
+            i.put("type",   "hausse");
+            i.put("icon",   "TrendingUp");
+            i.put("titre",  "Meilleur groupe — " + groupeMax);
+            i.put("body",   "Le groupe " + groupeMax + " atteint " + (long) globalMax + "% de présence cette semaine.");
+            i.put("pct",    (long) globalMax);
+            insights.add(i);
+        }
+    } catch (Exception ex) {
+        System.err.println("⚠️ Insights groupes : " + ex.getMessage());
+    }
+
+    // ── 2. SPÉCIALITÉS : ce mois ──────────────────────────────────────────
+    try {
+        List<Seance> seancesMois = seanceRepository
+                .findByDateHeureDebutBetween(debutMois, now).stream()
+                .filter(Seance::isEstTerminee)
+                .collect(Collectors.toList());
+
+        Map<String, long[]> parSpe = new LinkedHashMap<>(); // [totalAttendus, totalPresents]
+
+        for (Seance s : seancesMois) {
+            if (s.getCours() == null || s.getCours().getSpecialite() == null) continue;
+            String spe = s.getCours().getSpecialite();
+            List<Etudiant> attendus = getEtudiantsConcerneParSeance(s);
+            long presents = presenceRepository.findBySeance_Id(s.getId()).stream()
+                    .filter(p -> "PRESENT".equals(p.getStatutPresence())).count();
+
+            parSpe.computeIfAbsent(spe, k -> new long[]{0L, 0L});
+            parSpe.get(spe)[0] += attendus.size();
+            parSpe.get(spe)[1] += presents;
+        }
+
+        for (Map.Entry<String, long[]> entry : parSpe.entrySet()) {
+            long totalA = entry.getValue()[0];
+            long totalP = entry.getValue()[1];
+            if (totalA == 0) continue;
+            long pct = Math.round(((double) totalP / totalA) * 100);
+
+            Map<String, Object> i = new LinkedHashMap<>();
+            if (pct >= 80) {
+                i.put("type",  "hausse_spe");
+                i.put("icon",  "TrendingUp");
+                i.put("titre", entry.getKey() + " en hausse ce mois");
+                i.put("body",  "La spécialité " + entry.getKey() + " atteint " + pct + "% de présence ce mois-ci.");
+            } else {
+                i.put("type",  "baisse_spe");
+                i.put("icon",  "TrendingDown");
+                i.put("titre", entry.getKey() + " — attention requise");
+                i.put("body",  "La spécialité " + entry.getKey() + " affiche seulement " + pct + "% ce mois-ci.");
+            }
+            i.put("pct", pct);
+            insights.add(i);
+        }
+    } catch (Exception ex) {
+        System.err.println("⚠️ Insights spécialités : " + ex.getMessage());
+    }
+
+    // ── 3. JUSTIFICATIFS ──────────────────────────────────────────────────
+    try {
+        long enAttente = justificatifRepository.countByStatutValidation("EN_ATTENTE");
+        long acceptes  = justificatifRepository.countByStatutValidation("ACCEPTE");
+        long refuses   = justificatifRepository.countByStatutValidation("REFUSE");
+
+        Map<String, Object> i = new LinkedHashMap<>();
+        i.put("type",     "justificatifs");
+        i.put("icon",     "FileText");
+        i.put("titre",    enAttente + " justificatif(s) en attente");
+        i.put("body",     acceptes + " accepté(s) · " + refuses + " refusé(s). " +
+                          (enAttente > 0 ? "Des absences requièrent votre attention." : "Tout est traité."));
+        i.put("enAttente", enAttente);
+        i.put("acceptes",  acceptes);
+        i.put("refuses",   refuses);
+        insights.add(i);
+    } catch (Exception ex) {
+        System.err.println("⚠️ Insights justificatifs : " + ex.getMessage());
+    }
+
+    return ResponseEntity.ok(insights);
+}
     @GetMapping("/stats")
     public ResponseEntity<Map<String, Object>> getGlobalStats() {
         Map<String, Object> stats = new HashMap<>();
