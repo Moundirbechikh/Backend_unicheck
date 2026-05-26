@@ -6,6 +6,7 @@ import com.example.presence_server.repositories.EtudiantRepository;
 import com.example.presence_server.repositories.PresenceRepository;
 import com.example.presence_server.repositories.ProfesseurRepository;
 import com.example.presence_server.repositories.SeanceRepository;
+import com.example.presence_server.repositories.JustificatifRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
