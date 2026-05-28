@@ -89,13 +89,14 @@ public class ProfesseurController {
         return ResponseEntity.ok(stats);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // GET /api/professeurs/admin/tous-avec-stats  — inchangé
+// ─────────────────────────────────────────────────────────────────────────
+    // GET /api/professeurs/admin/tous-avec-stats
     // ─────────────────────────────────────────────────────────────────────────
     @GetMapping("/admin/tous-avec-stats")
     public ResponseEntity<List<Map<String, Object>>> getTousAvecStats() {
 
         List<Professeur> tous = professeurRepository.findAll();
+        List<Etudiant> tousEtudiants = etudiantRepository.findAll();
         List<Map<String, Object>> result = new ArrayList<>();
 
         for (Professeur p : tous) {
@@ -107,8 +108,7 @@ public class ProfesseurController {
 
             long totalMinutes = seancesTerminees.stream()
                     .filter(s -> s.getDateHeureDebut() != null && s.getDateHeureFin() != null)
-                    .mapToLong(s -> Duration.between(
-                            s.getDateHeureDebut(), s.getDateHeureFin()).toMinutes())
+                    .mapToLong(s -> Duration.between(s.getDateHeureDebut(), s.getDateHeureFin()).toMinutes())
                     .sum();
             long heures  = totalMinutes / 60;
             long minutes = totalMinutes % 60;
@@ -120,24 +120,49 @@ public class ProfesseurController {
             long justifsAttente = justificatifRepository
                     .countBySeance_Professeur_IdAndStatutValidation(p.getId(), "EN_ATTENTE");
 
-            long totalPointages = 0;
-            for (Seance s : seancesTerminees) {
-                totalPointages += presenceRepository.findBySeance_Id(s.getId()).stream()
-                        .filter(pr -> "PRESENT".equals(pr.getStatutPresence())).count();
-            }
-            double moyennePresentsParSeance = seancesTerminees.isEmpty()
-                    ? 0
-                    : Math.round((double) totalPointages / seancesTerminees.size() * 10.0) / 10.0;
-
             List<String> modules = p.getCoursEnseignes() != null
-                    ? p.getCoursEnseignes().stream()
-                        .filter(Objects::nonNull).map(Cours::getLibelle)
+                    ? p.getCoursEnseignes().stream().filter(Objects::nonNull).map(Cours::getLibelle)
                         .filter(Objects::nonNull).distinct().collect(Collectors.toList())
                     : new ArrayList<>();
 
-            List<String> groupes = seancesTerminees.stream()
-                    .map(Seance::getGroupe).filter(Objects::nonNull)
-                    .distinct().collect(Collectors.toList());
+            // ── CALCUL DES POURCENTAGES (Global + Par Module) ──
+            long globalPresents = 0;
+            long globalAttendus = 0;
+            Map<String, long[]> parModule = new HashMap<>(); // libelle -> [presents, attendus]
+
+            for (Seance s : seancesTerminees) {
+                String module = s.getCours() != null ? s.getCours().getLibelle() : "Inconnu";
+                String groupeSeance = s.getGroupe();
+                if (groupeSeance == null || groupeSeance.isBlank()) continue;
+
+                long nbAttendus = tousEtudiants.stream()
+                        .filter(e -> e.getSpecialite() != null && !e.getSpecialite().isBlank())
+                        .filter(e -> groupeSeance.toLowerCase().contains(e.getSpecialite().toLowerCase()))
+                        .count();
+
+                long nbPresents = presenceRepository.findBySeance_Id(s.getId()).stream()
+                        .filter(pr -> "PRESENT".equals(pr.getStatutPresence())).count();
+
+                globalAttendus += nbAttendus;
+                globalPresents += nbPresents;
+
+                parModule.putIfAbsent(module, new long[]{0, 0});
+                parModule.get(module)[0] += nbPresents;
+                parModule.get(module)[1] += nbAttendus;
+            }
+
+            long tauxGlobal = globalAttendus > 0 ? Math.round(((double) globalPresents / globalAttendus) * 100) : 0;
+            
+            List<Map<String, Object>> modulesStats = new ArrayList<>();
+            for (Map.Entry<String, long[]> entry : parModule.entrySet()) {
+                long p_pres = entry.getValue()[0];
+                long p_att = entry.getValue()[1];
+                long pct = p_att > 0 ? Math.round(((double) p_pres / p_att) * 100) : 0;
+                Map<String, Object> mStat = new HashMap<>();
+                mStat.put("libelle", entry.getKey());
+                mStat.put("taux", Math.min(pct, 100)); // Plafond à 100%
+                modulesStats.add(mStat);
+            }
 
             Map<String, Object> dto = new HashMap<>();
             dto.put("id",               p.getId());
@@ -145,16 +170,16 @@ public class ProfesseurController {
             dto.put("prenom",           p.getPrenom());
             dto.put("name",             p.getPrenom() + " " + p.getNom());
             dto.put("email",            p.getEmail() != null ? p.getEmail() : "—");
-            dto.put("heures",           heures);
-            dto.put("minutes",          minutes);
             dto.put("heuresFormat",     heures + "h" + (minutes > 0 ? String.format("%02d", minutes) : ""));
             dto.put("seancesTotal",     totalSeances);
             dto.put("seancesTerminees", seancesTerminees.size());
             dto.put("justifsAttente",   justifsAttente);
             dto.put("modules",          modules);
-            dto.put("nbModules",        modules.size());
-            dto.put("groupes",          groupes);
-            dto.put("moyennePresents",  moyennePresentsParSeance);
+            
+            // Nouvelles données de statistiques
+            dto.put("tauxPresenceGlobal", Math.min(tauxGlobal, 100));
+            dto.put("modulesStats",       modulesStats);
+
             result.add(dto);
         }
 
