@@ -168,6 +168,58 @@ public class InscriptionController {
         result.put("message", "Compte créé avec succès.");
         return ResponseEntity.ok(result);
     }
+@PostMapping("/etudiant/admin/creer")
+    public ResponseEntity<Map<String, Object>> creerEtudiantAdmin(
+            @RequestBody Map<String, String> body,
+            HttpServletRequest request) {
+
+        String role = (String) request.getAttribute("role");
+        if (!"admin".equals(role)) {
+            return ResponseEntity.status(403).body(Map.of("success", false, "message", "Accès refusé."));
+        }
+
+        Map<String, Object> result = new HashMap<>();
+
+        String nom = body.get("nom");
+        String prenom = body.get("prenom");
+        String email = body.get("email");
+        String matricule = body.get("matricule");
+        String specialite = body.get("specialite");
+        String groupe = body.get("groupe");
+
+        if (nom == null || prenom == null || matricule == null || nom.isBlank() || prenom.isBlank() || matricule.isBlank()) {
+            result.put("success", false);
+            result.put("message", "Le nom, prénom et matricule sont obligatoires.");
+            return ResponseEntity.badRequest().body(result);
+        }
+
+        if (etudiantRepository.existsByMatricule(matricule)) {
+            result.put("success", false);
+            result.put("message", "Ce matricule existe déjà.");
+            return ResponseEntity.badRequest().body(result);
+        }
+
+        if (email != null && !email.isBlank() && userRepositorie.existsByEmail(email)) {
+            result.put("success", false);
+            result.put("message", "Cet email est déjà utilisé.");
+            return ResponseEntity.badRequest().body(result);
+        }
+
+        Etudiant e = new Etudiant();
+        e.setNom(nom);
+        e.setPrenom(prenom);
+        e.setMatricule(matricule);
+        e.setSpecialite(specialite);
+        e.setGroupe(groupe);
+        e.setEmail(email);
+
+        etudiantRepository.save(e);
+
+        result.put("success", true);
+        result.put("message", "Étudiant créé avec succès.");
+        return ResponseEntity.ok(result);
+    }
+
 
     // ─────────────────────────────────────────────────────────────────────────
     // 5. POST /api/inscription/professeur
