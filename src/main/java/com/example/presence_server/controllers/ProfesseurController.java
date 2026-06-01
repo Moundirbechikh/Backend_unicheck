@@ -89,6 +89,25 @@ public class ProfesseurController {
         return ResponseEntity.ok(stats);
     }
 
+@GetMapping("/me/{id}")
+    public ResponseEntity<ProfStatsDTO> getProfile(@PathVariable Long id) {
+        return getStats(id);
+    }
+
+    @PutMapping("/{id}/update-password")
+    public ResponseEntity<?> updatePassword(@PathVariable Long id, @RequestBody Map<String, String> passwords) {
+        Optional<Professeur> opt = professeurRepository.findById(id);
+        if (opt.isEmpty()) return ResponseEntity.notFound().build();
+
+        String newPassword = passwords.get("newPassword");
+        if (newPassword == null || newPassword.isBlank())
+            return ResponseEntity.badRequest().body(Map.of("success", false, "message", "Mot de passe requis."));
+
+        Professeur p = opt.get();
+        p.setMotDePasse(newPassword);
+        professeurRepository.save(p);
+        return ResponseEntity.ok(Map.of("success", true, "message", "Mot de passe mis à jour."));
+    }
 // ─────────────────────────────────────────────────────────────────────────
     // GET /api/professeurs/admin/tous-avec-stats
     // ─────────────────────────────────────────────────────────────────────────
