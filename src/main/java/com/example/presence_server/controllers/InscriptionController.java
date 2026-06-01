@@ -5,6 +5,7 @@ import com.example.presence_server.models.Professeur;
 import com.example.presence_server.repositories.EtudiantRepository;
 import com.example.presence_server.repositories.UserRepositorie;
 import com.example.presence_server.services.EmailService;
+import jakarta.servlet.http.HttpServletRequest; // <-- LE CORRECTIF EST ICI
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -152,7 +153,6 @@ public class InscriptionController {
         etudiant.setGroupe(groupe);
         etudiantRepository.save(etudiant);
 
-        // 🚀 CORRECTION : ENVOI DU MAIL EN ASYNCHRONE (Ne bloque plus le frontend)
         String nomComplet = etudiant.getPrenom() + " " + etudiant.getNom();
         String mailDestinataire = etudiant.getEmail();
         
@@ -168,7 +168,11 @@ public class InscriptionController {
         result.put("message", "Compte créé avec succès.");
         return ResponseEntity.ok(result);
     }
-@PostMapping("/etudiant/admin/creer")
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // NOUVEAU: POST /api/inscription/etudiant/admin/creer
+    // ─────────────────────────────────────────────────────────────────────────
+    @PostMapping("/etudiant/admin/creer")
     public ResponseEntity<Map<String, Object>> creerEtudiantAdmin(
             @RequestBody Map<String, String> body,
             HttpServletRequest request) {
@@ -220,7 +224,6 @@ public class InscriptionController {
         return ResponseEntity.ok(result);
     }
 
-
     // ─────────────────────────────────────────────────────────────────────────
     // 5. POST /api/inscription/professeur
     // ─────────────────────────────────────────────────────────────────────────
@@ -255,7 +258,6 @@ public class InscriptionController {
         prof.setMotDePasse(password);
         userRepositorie.save(prof);
 
-        // 🚀 CORRECTION : ENVOI DU MAIL EN ASYNCHRONE (Ne bloque plus le frontend)
         String nomComplet = prof.getPrenom() + " " + prof.getNom();
         String mailDestinataire = prof.getEmail();
         
