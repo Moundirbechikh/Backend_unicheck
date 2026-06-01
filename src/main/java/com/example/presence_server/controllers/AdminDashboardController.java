@@ -1,5 +1,6 @@
 package com.example.presence_server.controllers;
-
+import com.example.presence_server.models.Utilisateur;
+import com.example.presence_server.repositories.UserRepositorie;
 import com.example.presence_server.models.Etudiant;
 import com.example.presence_server.models.Seance;
 import com.example.presence_server.repositories.EtudiantRepository;
@@ -10,7 +11,9 @@ import com.example.presence_server.repositories.JustificatifRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+// Ajouter ces imports en haut :
 
+import java.util.Optional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -28,7 +31,8 @@ public class AdminDashboardController {
     @Autowired private SeanceRepository seanceRepository;
     @Autowired private PresenceRepository presenceRepository;
     @Autowired private JustificatifRepository justificatifRepository;
-
+// Ajouter ce @Autowired dans la classe :
+@Autowired private UserRepositorie userRepositorie;
 
     // Helper réutilisé depuis SeanceController — copier la même logique
     private List<Etudiant> getEtudiantsConcerneParSeance(Seance seance) {
@@ -48,6 +52,46 @@ public class AdminDashboardController {
         return result;
     }
 
+
+
+
+// ─────────────────────────────────────────────────────────────────────────
+// PUT /api/admin/dashboard/update-password
+// ─────────────────────────────────────────────────────────────────────────
+@PutMapping("/update-password")
+public ResponseEntity<?> updatePassword(
+        @RequestBody Map<String, String> body,
+        jakarta.servlet.http.HttpServletRequest request) {
+
+    String role = (String) request.getAttribute("role");
+    if (!"admin".equals(role)) {
+        return ResponseEntity.status(403).body(Map.of("success", false, "message", "Accès refusé."));
+    }
+
+    Object userIdAttr = request.getAttribute("userId");
+    if (userIdAttr == null) {
+        return ResponseEntity.status(401).body(Map.of("success", false, "message", "Non authentifié."));
+    }
+
+    Long userId = Long.valueOf(userIdAttr.toString());
+    String newPassword = body.get("newPassword");
+
+    if (newPassword == null || newPassword.isBlank() || newPassword.length() < 6) {
+        return ResponseEntity.badRequest().body(Map.of("success", false, "message", "Mot de passe trop court (min. 6 caractères)."));
+    }
+
+    Optional<Utilisateur> opt = userRepositorie.findById(userId);
+    if (opt.isEmpty()) {
+        return ResponseEntity.status(404).body(Map.of("success", false, "message", "Utilisateur introuvable."));
+    }
+
+    Utilisateur admin = opt.get();
+    admin.setMotDePasse(newPassword);
+    userRepositorie.save(admin);
+
+    System.out.println("🔐 [ADMIN] Mot de passe mis à jour pour userId=" + userId);
+    return ResponseEntity.ok(Map.of("success", true, "message", "Mot de passe mis à jour avec succès."));
+}
 
     // ─────────────────────────────────────────────────────────────────────────
     // GET /api/admin/dashboard/insights
