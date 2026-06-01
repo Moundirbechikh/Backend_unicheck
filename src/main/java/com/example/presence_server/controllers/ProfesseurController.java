@@ -90,9 +90,91 @@ public class ProfesseurController {
     }
 
 @GetMapping("/me/{id}")
-    public ResponseEntity<ProfStatsDTO> getProfile(@PathVariable Long id) {
-        return getStats(id);
+public ResponseEntity<Map<String, Object>> getProfile(@PathVariable Long id) {
+    Optional<Professeur> opt = professeurRepository.findById(id);
+    if (opt.isEmpty()) return ResponseEntity.notFound().build();
+
+    Professeur p = opt.get();
+    List<Etudiant> tousEtudiants = etudiantRepository.findAll();
+
+    List<Seance> seancesTerminees = seanceRepository
+            .findByProfesseur_IdAndDateHeureFinBefore(p.getId(), LocalDateTime.now())
+            .stream().filter(Seance::isEstTerminee).collect(Collectors.toList());
+
+    // Heures
+    long totalMinutes = seancesTerminees.stream()
+            .filter(s -> s.getDateHeureDebut() != null && s.getDateHeureFin() != null)
+            .mapToLong(s -> Duration.between(s.getDateHeureDebut(), s.getDateHeureFin()).toMinutes())
+            .sum();
+    long heures  = totalMinutes / 60;
+    long minutes = totalMinutes % 60;
+
+    // Justificatifs
+    long justifsAttente = justificatifRepository
+            .countBySeance_Professeur_IdAndStatutValidation(p.getId(), "EN_ATTENTE");
+
+    // Modules
+    List<String> modules = p.getCoursEnseignes() != null
+            ? p.getCoursEnseignes().stream().filter(Objects::nonNull)
+                .map(Cours::getLibelle).filter(Objects::nonNull)
+                .distinct().collect(Collectors.toList())
+            : new ArrayList<>();
+
+    // Taux global + par module
+    long globalPresents = 0;
+    long globalAttendus = 0;
+    Map<String, long[]> parModule = new LinkedHashMap<>();
+
+    for (Seance s : seancesTerminees) {
+        String module      = s.getCours() != null ? s.getCours().getLibelle() : "Inconnu";
+        String groupeSeance = s.getGroupe();
+        if (groupeSeance == null || groupeSeance.isBlank()) continue;
+
+        long nbAttendus = tousEtudiants.stream()
+                .filter(e -> e.getSpecialite() != null && !e.getSpecialite().isBlank())
+                .filter(e -> groupeSeance.toLowerCase().contains(e.getSpecialite().toLowerCase()))
+                .count();
+
+        long nbPresents = presenceRepository.findBySeance_Id(s.getId()).stream()
+                .filter(pr -> "PRESENT".equals(pr.getStatutPresence())).count();
+
+        globalAttendus += nbAttendus;
+        globalPresents += nbPresents;
+
+        parModule.putIfAbsent(module, new long[]{0, 0});
+        parModule.get(module)[0] += nbPresents;
+        parModule.get(module)[1] += nbAttendus;
     }
+
+    long tauxGlobal = globalAttendus > 0
+            ? Math.min(Math.round(((double) globalPresents / globalAttendus) * 100), 100)
+            : 0;
+
+    List<Map<String, Object>> modulesStats = new ArrayList<>();
+    for (Map.Entry<String, long[]> entry : parModule.entrySet()) {
+        long pres = entry.getValue()[0];
+        long att  = entry.getValue()[1];
+        long pct  = att > 0 ? Math.min(Math.round(((double) pres / att) * 100), 100) : 0;
+        Map<String, Object> mStat = new HashMap<>();
+        mStat.put("libelle", entry.getKey());
+        mStat.put("taux", pct);
+        modulesStats.add(mStat);
+    }
+
+    Map<String, Object> result = new HashMap<>();
+    result.put("id",                p.getId());
+    result.put("nom",               p.getNom());
+    result.put("prenom",            p.getPrenom());
+    result.put("email",             p.getEmail() != null ? p.getEmail() : "");
+    result.put("heuresFormat",      heures + "h" + (minutes > 0 ? String.format("%02d", minutes) : ""));
+    result.put("seancesTerminees",  seancesTerminees.size());
+    result.put("justifsAttente",    justifsAttente);
+    result.put("modules",           modules);
+    result.put("tauxPresenceGlobal", tauxGlobal);
+    result.put("modulesStats",      modulesStats);
+
+    return ResponseEntity.ok(result);
+}
 
     @PutMapping("/{id}/update-password")
     public ResponseEntity<?> updatePassword(@PathVariable Long id, @RequestBody Map<String, String> passwords) {
