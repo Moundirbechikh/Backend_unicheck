@@ -237,34 +237,54 @@ public ResponseEntity<Map<String, Object>> validerScan(
             return ResponseEntity.ok(response);
         }
 
-        // ── 4. GPS : Seuil strict (100m) ───────────────────────────────────
-        double distanceCalculee = 0;
+        // ── 4. GPS OBLIGATOIRE — Seuil dynamique selon précision ───────────────────
+double distanceCalculee = 0;
 
-        boolean etudiantAGps = request.getStudentLat() != null
-                && request.getStudentLng() != null
-                && !(request.getStudentLat() == 0.0 && request.getStudentLng() == 0.0);
+boolean etudiantAGps = request.getStudentLat() != null
+        && request.getStudentLng() != null
+        && !(request.getStudentLat() == 0.0 && request.getStudentLng() == 0.0);
 
-        boolean profAGps = seance.getProfLat() != null && seance.getProfLng() != null
-                && !(seance.getProfLat() == 0.0 && seance.getProfLng() == 0.0);
+boolean profAGps = seance.getProfLat() != null && seance.getProfLng() != null
+        && !(seance.getProfLat() == 0.0 && seance.getProfLng() == 0.0);
 
-        if (etudiantAGps && profAGps) {
-            distanceCalculee = calculerDistance(
-                    request.getStudentLat(), request.getStudentLng(),
-                    seance.getProfLat(),     seance.getProfLng()
-            );
+// GPS OBLIGATOIRE côté étudiant — refus si absent
+if (!etudiantAGps) {
+    response.put("success", false);
+    response.put("message", "La localisation GPS est obligatoire pour valider votre présence.");
+    return ResponseEntity.ok(response);
+}
 
-            // Seuil mis à jour à 100m (idéal pour couvrir le bâtiment et bloquer les fraudes)
-            if (distanceCalculee > 100.0) {
-                response.put("success", false);
-                response.put("message", String.format(
-                    "Vous êtes trop loin du cours (%.0fm détectés, max 100m). " +
-                    "Assurez-vous d'être dans le bâtiment et réessayez.",
-                    distanceCalculee));
-                response.put("distanceM", Math.round(distanceCalculee));
-                return ResponseEntity.ok(response);
-            }
-        }
-        // GPS absent d'un côté → mode dégradé, on laisse passer pour éviter de bloquer la classe
+if (profAGps) {
+    distanceCalculee = calculerDistance(
+            request.getStudentLat(), request.getStudentLng(),
+            seance.getProfLat(),     seance.getProfLng()
+    );
+
+    // Seuil dynamique : base 120m + marge GPS du navigateur (capé à 250m total)
+    // Exemples :
+    //   accuracy=10m → seuil=130m  (GPS précis)
+    //   accuracy=30m → seuil=150m  (GPS normal extérieur)
+    //   accuracy=80m → seuil=200m  (GPS dégradé intérieur)
+    double studentAccuracy = request.getStudentAccuracy() != null && request.getStudentAccuracy() > 0
+            ? request.getStudentAccuracy()
+            : 30.0; // valeur par défaut si accuracy non transmise
+
+    double seuil = Math.min(120.0 + studentAccuracy, 250.0);
+
+    System.out.printf("📍 [GPS] Distance: %.1fm | Précision GPS: %.0fm | Seuil: %.0fm%n",
+            distanceCalculee, studentAccuracy, seuil);
+
+    if (distanceCalculee > seuil) {
+        response.put("success", false);
+        response.put("message", String.format(
+            "Vous semblez trop loin (%.0fm détectés, seuil %.0fm). " +
+            "Assurez-vous d'être dans la salle et réessayez.",
+            distanceCalculee, seuil));
+        response.put("distanceM", Math.round(distanceCalculee));
+        return ResponseEntity.ok(response);
+    }
+}
+// Si profAGps absent → mode dégradé accepté (prof n'a pas de GPS)
 
         // ── 5. Device ID ────────────────────────────────────────────────────
         String deviceIdRecu = request.getDeviceId();

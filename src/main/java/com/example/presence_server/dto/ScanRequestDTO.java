@@ -2,6 +2,7 @@ package com.example.presence_server.dto;
 
 public class ScanRequestDTO {
     private String token;
+    private Double studentAccuracy; // Précision GPS du navigateur en mètres
     private Double studentLat;
     private Double studentLng;
     private String deviceId;
@@ -11,6 +12,10 @@ public class ScanRequestDTO {
     // Getters et Setters
     public String getToken() { return token; }
     public void setToken(String token) { this.token = token; }
+
+// Getter + Setter :
+public Double getStudentAccuracy() { return studentAccuracy; }
+public void setStudentAccuracy(Double studentAccuracy) { this.studentAccuracy = studentAccuracy; }
 
     public Double getStudentLat() { return studentLat; }
     public void setStudentLat(Double studentLat) { this.studentLat = studentLat; }
