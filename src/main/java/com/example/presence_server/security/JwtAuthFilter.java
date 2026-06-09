@@ -31,7 +31,8 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         String path = request.getServletPath();
 
         // ✅ 2. Routes publiques — pas de token requis
-        if (path.startsWith("/api/auth") || path.startsWith("/api/inscription")) {
+        // AJOUT DE 'path.startsWith("/api/public")' POUR LE KEEP-ALIVE/PING
+        if (path.startsWith("/api/auth") || path.startsWith("/api/inscription") || path.startsWith("/api/public")) {
             filterChain.doFilter(request, response);
             return;
         }

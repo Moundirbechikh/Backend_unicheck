@@ -12,7 +12,9 @@ public class WebConfig implements WebMvcConfigurer {
         registry.addMapping("/**")
                 .allowedOrigins(
                     "http://localhost:3000",                         // Pour tes tests en local
-                    "https://unicheck-drab.vercel.app"               // Ton site Vercel (Prod)
+                    "https://unicheck-drab.vercel.app",
+                    "https://cron-job.org/"               // Ton site Vercel (Prod)
+
                 )
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")

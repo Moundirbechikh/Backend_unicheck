@@ -150,30 +150,29 @@ public ResponseEntity<?> getProchainCours(@PathVariable Long profId) {
 // ── Helper : formater la séance pour le dashboard prof ───────────────────
 private Map<String, Object> formatSeancePourDashboard(Seance s) {
     Map<String, Object> dto = new HashMap<>();
-    dto.put("id",             s.getId());
-    dto.put("titre",          s.getTitre());
-    dto.put("typeSeance",     s.getTypeSeance());
-    dto.put("groupe",         s.getGroupe());
-    dto.put("jour",           s.getJour());
-    dto.put("heurePlage",     s.getHeurePlage());
-    dto.put("dateHeureDebut", s.getDateHeureDebut());
-    dto.put("dateHeureFin",   s.getDateHeureFin());
-    dto.put("estActive",      s.isEstActive());
-    dto.put("estTerminee",    s.isEstTerminee());
-    dto.put("numeroSeance",   s.getNumeroSeance());
-    
-    // 💡 NOUVEAU : On injecte la capacité totale calculée dynamiquement !
-    dto.put("totalAttendus",  getEtudiantsConcerneParSeance(s).size());
+    dto.put("id",                 s.getId());
+    dto.put("titre",              s.getTitre());
+    dto.put("typeSeance",         s.getTypeSeance());
+    dto.put("groupe",             s.getGroupe());
+    dto.put("jour",               s.getJour());
+    dto.put("heurePlage",         s.getHeurePlage());
+    dto.put("dateHeureDebut",     s.getDateHeureDebut());
+    dto.put("dateHeureFin",       s.getDateHeureFin());
+    dto.put("estActive",          s.isEstActive());
+    dto.put("estTerminee",        s.isEstTerminee());
+    dto.put("numeroSeance",       s.getNumeroSeance());
+    dto.put("totalAttendus",      getEtudiantsConcerneParSeance(s).size());
 
-    // Cours
+    // ← LIGNE MANQUANTE — timer second device
+    dto.put("dateHeureLancement", s.getDateHeureLancement() != null
+            ? s.getDateHeureLancement().toString() : null);
+
     if (s.getCours() != null) {
         Map<String, Object> coursDto = new HashMap<>();
         coursDto.put("id",      s.getCours().getId());
         coursDto.put("libelle", s.getCours().getLibelle());
         dto.put("cours", coursDto);
     }
-
-    // Professeur
     if (s.getProfesseur() != null) {
         Map<String, Object> profDto = new HashMap<>();
         profDto.put("id",     s.getProfesseur().getId());
@@ -181,15 +180,12 @@ private Map<String, Object> formatSeancePourDashboard(Seance s) {
         profDto.put("prenom", s.getProfesseur().getPrenom());
         dto.put("professeur", profDto);
     }
-
-    // Salle
     if (s.getSalle() != null) {
         Map<String, Object> salleDto = new HashMap<>();
         salleDto.put("id",  s.getSalle().getId());
         salleDto.put("nom", s.getSalle().getNom());
         dto.put("salle", salleDto);
     }
-
     return dto;
 }
 
@@ -280,7 +276,6 @@ public ResponseEntity<?> getSessionState(@PathVariable Long id) {
 
     // ─────────────────────────────────────────────────────────────────────────
     // PUT /api/seances/{id}/terminer
-    // ─────────────────────────────────────────────────────────────────────────
 @PutMapping("/{id}/terminer")
 @Transactional
 public ResponseEntity<?> terminerSeance(@PathVariable Long id) {
@@ -291,28 +286,29 @@ public ResponseEntity<?> terminerSeance(@PathVariable Long id) {
             return ResponseEntity.ok(Map.of("message", "Déjà terminée"));
         }
 
-        // ── Terminer immédiatement — réponse rapide ───────────────────────
         seance.setEstActive(false);
         seance.setEstTerminee(true);
         seance.setDateHeureFin(LocalDateTime.now());
         seanceRepository.saveAndFlush(seance);
 
-        // ── Recycling + Notifications en ASYNCHRONE (ne bloque plus) ─────
-        final Long   seanceId   = seance.getId();
-        final String module     = seance.getCours()      != null ?
-                seance.getCours().getLibelle() : "Module inconnu";
-        final Long   coursId    = seance.getCours()      != null ?
-                seance.getCours().getId()       : null;
-        final String profNom    = seance.getProfesseur() != null
-                ? "Prof. " + seance.getProfesseur().getPrenom() + " " + seance.getProfesseur().getNom()
+        // Capturer tout avant l'async (les entités JPA ne sont plus accessibles après)
+        final Long   seanceId       = seance.getId();
+        final String module         = seance.getCours() != null
+                                      ? seance.getCours().getLibelle() : "Module inconnu";
+        final Long   coursId        = seance.getCours() != null
+                                      ? seance.getCours().getId() : null;
+        final String groupeSeance   = seance.getGroupe();
+        final String profNom        = seance.getProfesseur() != null
+                ? "Prof. " + seance.getProfesseur().getPrenom()
+                  + " " + seance.getProfesseur().getNom()
                 : "votre professeur";
         final String jourSeance     = seance.getJour();
         final String heurePlage     = seance.getHeurePlage();
-        final Seance seanceSnapshot = seance; // référence pour le thread
+        final Seance seanceSnapshot = seance;
 
         java.util.concurrent.CompletableFuture.runAsync(() -> {
 
-            // ── Recycling +7 jours exact ──────────────────────────────────
+            // ── Recycling +7 jours ────────────────────────────────────────
             try {
                 if (jourSeance != null && heurePlage != null) {
                     LocalDateTime nextPlanifiee;
@@ -334,16 +330,14 @@ public ResponseEntity<?> terminerSeance(@PathVariable Long id) {
                     prochaine.setCours(seanceSnapshot.getCours());
                     prochaine.setProfesseur(seanceSnapshot.getProfesseur());
                     prochaine.setTitre(seanceSnapshot.getTitre());
-                    prochaine.setNumeroSeance(
-                            seanceSnapshot.getNumeroSeance() != null
-                                    ? seanceSnapshot.getNumeroSeance() + 1 : 2);
+                    prochaine.setNumeroSeance(seanceSnapshot.getNumeroSeance() != null
+                            ? seanceSnapshot.getNumeroSeance() + 1 : 2);
                     prochaine.setDateHeureDebut(nextPlanifiee);
                     prochaine.setDateHeureFin(nextPlanifiee.plusMinutes(90));
                     prochaine.setDatePlanifiee(nextPlanifiee);
                     prochaine.setEstActive(false);
                     prochaine.setEstTerminee(false);
                     seanceRepository.save(prochaine);
-
                     System.out.println("🔄 [RECYCLING] Séance recréée le "
                             + nextPlanifiee.toLocalDate() + " à " + heurePlage);
                 }
@@ -353,52 +347,105 @@ public ResponseEntity<?> terminerSeance(@PathVariable Long id) {
 
             // ── Notifications de fin ──────────────────────────────────────
             try {
+                // Supprimer les notifications de lancement pour cette séance
                 notificationRepository.deleteBySeanceIdAndTypeNotification(seanceId, "LANCEMENT");
+
                 List<Etudiant> etudiants = getEtudiantsConcerneParSeance(seanceSnapshot);
+                System.out.println("📢 [NOTIF FIN] " + etudiants.size() + " étudiant(s) concerné(s)");
+
                 for (Etudiant e : etudiants) {
+
+                    // ── Était-il présent à CETTE séance ? ─────────────────
+                    boolean presentCeJour = presenceRepository
+                            .findByEtudiant_IdAndSeance_Id(e.getId(), seanceId)
+                            .isPresent();
+
+                    // ── Total absences cumulées sur ce cours ───────────────
                     long absences = 0;
-                    if (coursId != null) {
-                        long total = seanceRepository
-                                .countByCours_IdAndGroupeAndEstTermineeTrue(
-                                    coursId, seanceSnapshot.getGroupe());
-                        long presences = presenceRepository
+                    if (coursId != null && groupeSeance != null) {
+                        long totalSeances = seanceRepository
+                                .countByCours_IdAndGroupeAndEstTermineeTrue(coursId, groupeSeance);
+                        long totalPresences = presenceRepository
                                 .countByEtudiant_IdAndSeance_Cours_IdAndStatutPresence(
                                         e.getId(), coursId, "PRESENT");
-                        absences = Math.max(0, total - presences);
+                        absences = Math.max(0, totalSeances - totalPresences);
                     }
 
-                    String gravite = calculerGravite(absences);
-                    String titre, message;
+                    String gravite;
+                    String titre;
+                    String message;
 
-                    if (absences == 0) {
-                        titre   = "✅ Séance terminée — " + module;
-                        message = "La séance de " + module
-                                + " est terminée. Félicitations, vous êtes présent(e) !";
+                    if (presentCeJour) {
+                        // ── Étudiant PRÉSENT ce jour ───────────────────────
+                        if (absences == 0) {
+                            gravite = "VERT";
+                            titre   = "✅ Présent(e) — " + module;
+                            message = "Séance de " + module + " terminée. "
+                                    + "Vous étiez présent(e) — aucune absence au compteur. Continuez !";
+                        } else if (absences <= 3) {
+                            gravite = "ORANGE";
+                            titre   = "🟠 Présent(e) — " + module;
+                            message = "Vous étiez présent(e) aujourd'hui en " + module + ". "
+                                    + "Vous avez cependant " + absences + " absence(s) cumulée(s). "
+                                    + "Soyez plus rigoureux(se) les prochaines fois !";
+                        } else {
+                            gravite = "ROUGE";
+                            titre   = "🔴 Présent(e) — " + module;
+                            message = "Vous étiez présent(e) aujourd'hui mais vous cumulez "
+                                    + absences + " absences en " + module + ". "
+                                    + "Réglez cette situation avec " + profNom + ".";
+                        }
                     } else {
-                        titre   = (absences >= 4 ? "🔴" : absences >= 2 ? "🟠" : "🟡")
-                                + " Séance terminée — " + module;
-                        message = "La séance de " + module + " est terminée. Vous avez "
-                                + absences + " absence(s)."
-                                + (absences >= 4 ? " Taux critique."
-                                   : absences >= 2 ? " Régularisez votre assiduité."
-                                   : " Justificatif si nécessaire.");
-                        if (absences == 4 && e.getEmail() != null && !e.getEmail().isBlank()) {
-                            emailService.envoyerAlerteAbsence(
-                                    e.getEmail(),
-                                    e.getPrenom() + " " + e.getNom(),
-                                    module, profNom, absences);
+                        // ── Étudiant ABSENT ce jour ────────────────────────
+                        if (absences <= 1) {
+                            gravite = "VERT";
+                            titre   = "🟡 Absent(e) — " + module;
+                            message = "Vous étiez absent(e) à la séance de " + module + ". "
+                                    + "C'est votre 1ère absence — pensez à la justifier si nécessaire.";
+                        } else if (absences <= 3) {
+                            gravite = "ORANGE";
+                            titre   = "🟠 Absent(e) — " + module;
+                            message = "Absent(e) à la séance de " + module + ". "
+                                    + "Vous avez désormais " + absences + " absence(s). "
+                                    + "Régularisez votre assiduité !";
+                        } else {
+                            gravite = "ROUGE";
+                            titre   = "🔴 Absent(e) — " + module;
+                            message = "Absent(e) à cette séance. Vous atteignez "
+                                    + absences + " absence(s) en " + module + ". "
+                                    + "Taux critique — contactez " + profNom + " impérativement.";
+
+                            // Email d'alerte à partir de 4 absences
+                            if (e.getEmail() != null && !e.getEmail().isBlank()) {
+                                try {
+                                    emailService.envoyerAlerteAbsence(
+                                            e.getEmail(),
+                                            e.getPrenom() + " " + e.getNom(),
+                                            module, profNom, absences);
+                                    System.out.println("📧 [EMAIL ALERTE] Envoyé à "
+                                            + e.getEmail() + " — " + absences + " absences");
+                                } catch (Exception mailEx) {
+                                    System.err.println("⚠️ Email alerte : " + mailEx.getMessage());
+                                }
+                            }
                         }
                     }
+
                     envoyerNotif(e, seanceId, "FIN", titre, message, gravite);
+                    System.out.printf("🔔 [NOTIF] %s %s | présent=%b | absences=%d | gravité=%s%n",
+                            e.getPrenom(), e.getNom(), presentCeJour, absences, gravite);
                 }
-                System.out.println("✅ [NOTIF FIN] Envoyées à " + etudiants.size() + " étudiant(s).");
+
+                System.out.println("✅ [NOTIF FIN] Traitées pour " + etudiants.size() + " étudiant(s).");
+
             } catch (Exception ex) {
-                System.err.println("⚠️ Notif fin : " + ex.getMessage());
+                System.err.println("❌ [NOTIF FIN] Erreur : " + ex.getMessage());
+                ex.printStackTrace();
             }
         });
 
-        // ── Réponse immédiate sans attendre l'async ───────────────────────
         return ResponseEntity.ok(Map.of("status", "success", "message", "Séance terminée."));
+
     }).orElse(ResponseEntity.notFound().build());
 }
 
