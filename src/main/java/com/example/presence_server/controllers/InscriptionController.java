@@ -172,7 +172,7 @@ public class InscriptionController {
     // ─────────────────────────────────────────────────────────────────────────
     // NOUVEAU: POST /api/inscription/etudiant/admin/creer
     // ─────────────────────────────────────────────────────────────────────────
-    @PostMapping("/etudiant/admin/creer")
+    @PostMapping("admin/etudiant/creer")
     public ResponseEntity<Map<String, Object>> creerEtudiantAdmin(
             @RequestBody Map<String, String> body,
             HttpServletRequest request) {

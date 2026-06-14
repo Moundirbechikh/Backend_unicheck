@@ -114,13 +114,13 @@ public class EtudiantController {
         if (opt.isEmpty()) return ResponseEntity.status(404).body(Map.of("success", false, "message", "Introuvable."));
 
         Etudiant e = opt.get();
-        if (payload.containsKey("nom"))       e.setNom(payload.get("nom"));
-        if (payload.containsKey("prenom"))    e.setPrenom(payload.get("prenom"));
+        if (payload.containsKey("nom"))        e.setNom(payload.get("nom"));
+        if (payload.containsKey("prenom"))     e.setPrenom(payload.get("prenom"));
         if (payload.containsKey("specialite")) e.setSpecialite(payload.get("specialite"));
-        if (payload.containsKey("groupe"))    e.setGroupe(payload.get("groupe"));
-        if (payload.containsKey("email"))     e.setEmail(payload.get("email"));
-        if (payload.containsKey("deviceId"))  e.setDeviceId(payload.get("deviceId"));
-        if (payload.containsKey("matricule")) e.setMatricule(payload.get("matricule"));
+        if (payload.containsKey("groupe"))     e.setGroupe(payload.get("groupe"));
+        if (payload.containsKey("email"))      e.setEmail(payload.get("email"));
+        if (payload.containsKey("deviceId"))   e.setDeviceId(payload.get("deviceId"));
+        if (payload.containsKey("matricule"))  e.setMatricule(payload.get("matricule"));
         etudiantRepository.save(e);
 
         return ResponseEntity.ok(Map.of("success", true, "message", "Étudiant mis à jour."));
@@ -139,5 +139,81 @@ public class EtudiantController {
         e.setMotDePasse(newPassword);
         etudiantRepository.save(e);
         return ResponseEntity.ok(Map.of("success", true, "message", "Mot de passe mis à jour."));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // DELETE /api/etudiants/{id}  — admin uniquement
+    //
+    // STRATÉGIE "SOFT ANONYMISATION" :
+    // On ne supprime PAS physiquement l'étudiant de la base de données.
+    // Pourquoi ? Parce que cet étudiant peut avoir des présences liées
+    // à des séances passées. Si on le supprime, les enregistrements de
+    // présence perdent leur référence (erreur de clé étrangère) ou
+    // deviennent incohérents dans les statistiques.
+    //
+    // À la place, on :
+    //   1. Remplace nom/prénom par "Inconnu" pour anonymiser
+    //   2. Efface toutes les données personnelles (email, matricule, etc.)
+    //   3. Désactive le compte (mot de passe null)
+    //   4. Conserve l'enregistrement en base → les stats restent cohérentes
+    //
+    // Résultat côté frontend : l'étudiant n'apparaît plus dans les listes
+    // car getTousAvecStats() filtre les étudiants sans nom valide.
+    // ─────────────────────────────────────────────────────────────────────────
+    @DeleteMapping("/{id}")
+    public ResponseEntity<?> supprimerEtudiant(
+            @PathVariable Long id,
+            HttpServletRequest request) {
+
+        // Vérification du rôle admin
+        String role = (String) request.getAttribute("role");
+        if (!"admin".equals(role)) {
+            return ResponseEntity.status(403).body(Map.of(
+                "success", false,
+                "message", "Accès refusé. Seul un administrateur peut supprimer un étudiant."
+            ));
+        }
+
+        // Vérifier que l'étudiant existe
+        Optional<Etudiant> opt = etudiantRepository.findById(id);
+        if (opt.isEmpty()) {
+            return ResponseEntity.status(404).body(Map.of(
+                "success", false,
+                "message", "Étudiant introuvable (ID: " + id + ")."
+            ));
+        }
+
+        Etudiant e = opt.get();
+
+        // ── Combien de présences cet étudiant a-t-il ? (pour le log) ─────────
+        // On compte pour le message de confirmation dans les logs serveur
+        long nbPresences = presenceRepository.findAll()
+                .stream()
+                .filter(p -> p.getEtudiant() != null && p.getEtudiant().getId().equals(id))
+                .count();
+
+        System.out.println("🗑️ [DELETE] Anonymisation de l'étudiant ID=" + id
+                + " (" + e.getPrenom() + " " + e.getNom() + ")"
+                + " — " + nbPresences + " présence(s) conservée(s) en base.");
+
+        // ── Anonymisation : remplacement des données personnelles ─────────────
+        e.setNom("Inconnu");
+        e.setPrenom("Inconnu");
+        e.setEmail(null);
+        e.setMatricule("SUPPRIME-" + id);   // matricule unique pour éviter les doublons de contrainte unique
+        e.setSpecialite(null);
+        e.setGroupe(null);
+        e.setDeviceId(null);
+        e.setMotDePasse(null);              // désactive le compte → plus de connexion possible
+        e.setCodeQrFixe(null);              // efface le QR code personnel
+
+        etudiantRepository.save(e);
+
+        System.out.println("✅ [DELETE] Étudiant ID=" + id + " anonymisé avec succès.");
+
+        return ResponseEntity.ok(Map.of(
+            "success", true,
+            "message", "Étudiant supprimé avec succès. Ses présences passées ont été conservées pour l'intégrité des statistiques."
+        ));
     }
 }
