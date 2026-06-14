@@ -16,6 +16,7 @@ import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.concurrent.CompletableFuture;
 
 @RestController
 @RequestMapping("/api/seances")
