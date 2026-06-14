@@ -170,17 +170,11 @@ public class InscriptionController {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // NOUVEAU: POST /api/inscription/etudiant/admin/creer
+    // NOUVEAU: POST /api/inscription/admin/etudiant/creer
     // ─────────────────────────────────────────────────────────────────────────
-    @PostMapping("admin/etudiant/creer")
+    @PostMapping("/etudiant/admin/creer")
     public ResponseEntity<Map<String, Object>> creerEtudiantAdmin(
-            @RequestBody Map<String, String> body,
-            HttpServletRequest request) {
-
-        String role = (String) request.getAttribute("role");
-        if (!"admin".equals(role)) {
-            return ResponseEntity.status(403).body(Map.of("success", false, "message", "Accès refusé."));
-        }
+            @RequestBody Map<String, String> body) {
 
         Map<String, Object> result = new HashMap<>();
 
@@ -223,7 +217,6 @@ public class InscriptionController {
         result.put("message", "Étudiant créé avec succès.");
         return ResponseEntity.ok(result);
     }
-
     // ─────────────────────────────────────────────────────────────────────────
     // 5. POST /api/inscription/professeur
     // ─────────────────────────────────────────────────────────────────────────
