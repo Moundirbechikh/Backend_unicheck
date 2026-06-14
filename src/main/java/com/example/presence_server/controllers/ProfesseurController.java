@@ -3,6 +3,7 @@ package com.example.presence_server.controllers;
 import com.example.presence_server.dto.ProfStatsDTO;
 import com.example.presence_server.models.*;
 import com.example.presence_server.repositories.*;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -20,7 +21,7 @@ public class ProfesseurController {
     @Autowired private JustificatifRepository  justificatifRepository;
     @Autowired private ProfesseurRepository    professeurRepository;
     @Autowired private PresenceRepository      presenceRepository;
-    @Autowired private EtudiantRepository      etudiantRepository; // ← AJOUTER
+    @Autowired private EtudiantRepository      etudiantRepository;
 
     // ─────────────────────────────────────────────────────────────────────────
     // GET /api/professeurs/{id}/stats  — dashboard prof avec vraies valeurs
@@ -81,7 +82,6 @@ public class ProfesseurController {
         long moyennePct = totalAttendus > 0
                 ? Math.round(((double) totalPresents / totalAttendus) * 100)
                 : 0;
-        // Plafonner à 100% (cas edge)
         moyennePct = Math.min(moyennePct, 100);
         String presenceMoyenne = moyennePct + "%";
 
@@ -89,112 +89,314 @@ public class ProfesseurController {
         return ResponseEntity.ok(stats);
     }
 
-@GetMapping("/me/{id}")
-public ResponseEntity<Map<String, Object>> getProfile(@PathVariable Long id) {
-    Optional<Professeur> opt = professeurRepository.findById(id);
-    if (opt.isEmpty()) return ResponseEntity.notFound().build();
+    // ─────────────────────────────────────────────────────────────────────────
+    // GET /api/professeurs/me/{id}  — profil complet du prof connecté
+    // ─────────────────────────────────────────────────────────────────────────
+    @GetMapping("/me/{id}")
+    public ResponseEntity<Map<String, Object>> getProfile(@PathVariable Long id) {
+        Optional<Professeur> opt = professeurRepository.findById(id);
+        if (opt.isEmpty()) return ResponseEntity.notFound().build();
 
-    Professeur p = opt.get();
-    List<Etudiant> tousEtudiants = etudiantRepository.findAll();
+        Professeur p = opt.get();
+        List<Etudiant> tousEtudiants = etudiantRepository.findAll();
 
-    List<Seance> seancesTerminees = seanceRepository
-            .findByProfesseur_IdAndDateHeureFinBefore(p.getId(), LocalDateTime.now())
-            .stream().filter(Seance::isEstTerminee).collect(Collectors.toList());
+        List<Seance> seancesTerminees = seanceRepository
+                .findByProfesseur_IdAndDateHeureFinBefore(p.getId(), LocalDateTime.now())
+                .stream().filter(Seance::isEstTerminee).collect(Collectors.toList());
 
-    // Heures
-    long totalMinutes = seancesTerminees.stream()
-            .filter(s -> s.getDateHeureDebut() != null && s.getDateHeureFin() != null)
-            .mapToLong(s -> Duration.between(s.getDateHeureDebut(), s.getDateHeureFin()).toMinutes())
-            .sum();
-    long heures  = totalMinutes / 60;
-    long minutes = totalMinutes % 60;
+        // Heures
+        long totalMinutes = seancesTerminees.stream()
+                .filter(s -> s.getDateHeureDebut() != null && s.getDateHeureFin() != null)
+                .mapToLong(s -> Duration.between(s.getDateHeureDebut(), s.getDateHeureFin()).toMinutes())
+                .sum();
+        long heures  = totalMinutes / 60;
+        long minutes = totalMinutes % 60;
 
-    // Justificatifs
-    long justifsAttente = justificatifRepository
-            .countBySeance_Professeur_IdAndStatutValidation(p.getId(), "EN_ATTENTE");
+        // Justificatifs
+        long justifsAttente = justificatifRepository
+                .countBySeance_Professeur_IdAndStatutValidation(p.getId(), "EN_ATTENTE");
 
-    // Modules
-    List<String> modules = p.getCoursEnseignes() != null
-            ? p.getCoursEnseignes().stream().filter(Objects::nonNull)
-                .map(Cours::getLibelle).filter(Objects::nonNull)
-                .distinct().collect(Collectors.toList())
-            : new ArrayList<>();
+        // Modules
+        List<String> modules = p.getCoursEnseignes() != null
+                ? p.getCoursEnseignes().stream().filter(Objects::nonNull)
+                    .map(Cours::getLibelle).filter(Objects::nonNull)
+                    .distinct().collect(Collectors.toList())
+                : new ArrayList<>();
 
-    // Taux global + par module
-    long globalPresents = 0;
-    long globalAttendus = 0;
-    Map<String, long[]> parModule = new LinkedHashMap<>();
+        // Taux global + par module
+        long globalPresents = 0;
+        long globalAttendus = 0;
+        Map<String, long[]> parModule = new LinkedHashMap<>();
 
-    for (Seance s : seancesTerminees) {
-        String module      = s.getCours() != null ? s.getCours().getLibelle() : "Inconnu";
-        String groupeSeance = s.getGroupe();
-        if (groupeSeance == null || groupeSeance.isBlank()) continue;
+        for (Seance s : seancesTerminees) {
+            String module      = s.getCours() != null ? s.getCours().getLibelle() : "Inconnu";
+            String groupeSeance = s.getGroupe();
+            if (groupeSeance == null || groupeSeance.isBlank()) continue;
 
-        long nbAttendus = tousEtudiants.stream()
-                .filter(e -> e.getSpecialite() != null && !e.getSpecialite().isBlank())
-                .filter(e -> groupeSeance.toLowerCase().contains(e.getSpecialite().toLowerCase()))
-                .count();
+            long nbAttendus = tousEtudiants.stream()
+                    .filter(e -> e.getSpecialite() != null && !e.getSpecialite().isBlank())
+                    .filter(e -> groupeSeance.toLowerCase().contains(e.getSpecialite().toLowerCase()))
+                    .count();
 
-        long nbPresents = presenceRepository.findBySeance_Id(s.getId()).stream()
-                .filter(pr -> "PRESENT".equals(pr.getStatutPresence())).count();
+            long nbPresents = presenceRepository.findBySeance_Id(s.getId()).stream()
+                    .filter(pr -> "PRESENT".equals(pr.getStatutPresence())).count();
 
-        globalAttendus += nbAttendus;
-        globalPresents += nbPresents;
+            globalAttendus += nbAttendus;
+            globalPresents += nbPresents;
 
-        parModule.putIfAbsent(module, new long[]{0, 0});
-        parModule.get(module)[0] += nbPresents;
-        parModule.get(module)[1] += nbAttendus;
+            parModule.putIfAbsent(module, new long[]{0, 0});
+            parModule.get(module)[0] += nbPresents;
+            parModule.get(module)[1] += nbAttendus;
+        }
+
+        long tauxGlobal = globalAttendus > 0
+                ? Math.min(Math.round(((double) globalPresents / globalAttendus) * 100), 100)
+                : 0;
+
+        List<Map<String, Object>> modulesStats = new ArrayList<>();
+        for (Map.Entry<String, long[]> entry : parModule.entrySet()) {
+            long pres = entry.getValue()[0];
+            long att  = entry.getValue()[1];
+            long pct  = att > 0 ? Math.min(Math.round(((double) pres / att) * 100), 100) : 0;
+            Map<String, Object> mStat = new HashMap<>();
+            mStat.put("libelle", entry.getKey());
+            mStat.put("taux", pct);
+            modulesStats.add(mStat);
+        }
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("id",                p.getId());
+        result.put("nom",               p.getNom());
+        result.put("prenom",            p.getPrenom());
+        result.put("email",             p.getEmail() != null ? p.getEmail() : "");
+        result.put("heuresFormat",      heures + "h" + (minutes > 0 ? String.format("%02d", minutes) : ""));
+        result.put("seancesTerminees",  seancesTerminees.size());
+        result.put("justifsAttente",    justifsAttente);
+        result.put("modules",           modules);
+        result.put("tauxPresenceGlobal", tauxGlobal);
+        result.put("modulesStats",      modulesStats);
+
+        return ResponseEntity.ok(result);
     }
 
-    long tauxGlobal = globalAttendus > 0
-            ? Math.min(Math.round(((double) globalPresents / globalAttendus) * 100), 100)
-            : 0;
-
-    List<Map<String, Object>> modulesStats = new ArrayList<>();
-    for (Map.Entry<String, long[]> entry : parModule.entrySet()) {
-        long pres = entry.getValue()[0];
-        long att  = entry.getValue()[1];
-        long pct  = att > 0 ? Math.min(Math.round(((double) pres / att) * 100), 100) : 0;
-        Map<String, Object> mStat = new HashMap<>();
-        mStat.put("libelle", entry.getKey());
-        mStat.put("taux", pct);
-        modulesStats.add(mStat);
-    }
-
-    Map<String, Object> result = new HashMap<>();
-    result.put("id",                p.getId());
-    result.put("nom",               p.getNom());
-    result.put("prenom",            p.getPrenom());
-    result.put("email",             p.getEmail() != null ? p.getEmail() : "");
-    result.put("heuresFormat",      heures + "h" + (minutes > 0 ? String.format("%02d", minutes) : ""));
-    result.put("seancesTerminees",  seancesTerminees.size());
-    result.put("justifsAttente",    justifsAttente);
-    result.put("modules",           modules);
-    result.put("tauxPresenceGlobal", tauxGlobal);
-    result.put("modulesStats",      modulesStats);
-
-    return ResponseEntity.ok(result);
-}
-
+    // ─────────────────────────────────────────────────────────────────────────
+    // PUT /api/professeurs/{id}/update-password
+    // ─────────────────────────────────────────────────────────────────────────
     @PutMapping("/{id}/update-password")
-    public ResponseEntity<?> updatePassword(@PathVariable Long id, @RequestBody Map<String, String> passwords) {
+    public ResponseEntity<?> updatePassword(
+            @PathVariable Long id,
+            @RequestBody Map<String, String> passwords) {
+
         Optional<Professeur> opt = professeurRepository.findById(id);
         if (opt.isEmpty()) return ResponseEntity.notFound().build();
 
         String newPassword = passwords.get("newPassword");
         if (newPassword == null || newPassword.isBlank())
-            return ResponseEntity.badRequest().body(Map.of("success", false, "message", "Mot de passe requis."));
+            return ResponseEntity.badRequest().body(
+                Map.of("success", false, "message", "Mot de passe requis."));
 
         Professeur p = opt.get();
         p.setMotDePasse(newPassword);
         professeurRepository.save(p);
         return ResponseEntity.ok(Map.of("success", true, "message", "Mot de passe mis à jour."));
     }
-// ─────────────────────────────────────────────────────────────────────────
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // GET /api/professeurs/admin/tous-sans-stats
+    //
+    // PHASE 1 — ENDPOINT RAPIDE (appelé en premier par le frontend)
+    // Retourne uniquement les infos de base de chaque professeur :
+    //   nom, prénom, email, modules, heures, séances, justificatifs
+    //
+    // PAS de calcul de taux de présence ici → réponse quasi-instantanée.
+    // Le frontend affiche les cartes immédiatement avec ces données.
+    // ─────────────────────────────────────────────────────────────────────────
+    @GetMapping("/admin/tous-sans-stats")
+    public ResponseEntity<List<Map<String, Object>>> getTousSansStats() {
+
+        System.out.println("📋 [PHASE 1] Chargement rapide des professeurs (sans calcul de présence)...");
+
+        List<Professeur> tous = professeurRepository.findAll();
+        List<Map<String, Object>> result = new ArrayList<>();
+
+        for (Professeur p : tous) {
+            // On ignore les profs sans nom (données incomplètes / anonymisés)
+            if (p.getNom() == null || p.getPrenom() == null) continue;
+            // On ignore les profs anonymisés (supprimés)
+            if ("Inconnu".equals(p.getNom()) && "Inconnu".equals(p.getPrenom())) continue;
+
+            // ── Séances terminées ─────────────────────────────────────────────
+            List<Seance> seancesTerminees = seanceRepository
+                    .findByProfesseur_IdAndDateHeureFinBefore(p.getId(), LocalDateTime.now())
+                    .stream().filter(Seance::isEstTerminee).collect(Collectors.toList());
+
+            // ── Calcul des heures (rapide — juste des soustractions de dates) ──
+            long totalMinutes = seancesTerminees.stream()
+                    .filter(s -> s.getDateHeureDebut() != null && s.getDateHeureFin() != null)
+                    .mapToLong(s -> Duration.between(
+                            s.getDateHeureDebut(), s.getDateHeureFin()).toMinutes())
+                    .sum();
+            long heures  = totalMinutes / 60;
+            long minutes = totalMinutes % 60;
+
+            // ── Nombre total de séances (terminées + futures) ─────────────────
+            long totalSeances = seanceRepository
+                    .findByProfesseur_IdAndEstTermineeFalseOrderByDateHeureDebutAsc(p.getId())
+                    .size() + seancesTerminees.size();
+
+            // ── Justificatifs en attente ──────────────────────────────────────
+            long justifsAttente = justificatifRepository
+                    .countBySeance_Professeur_IdAndStatutValidation(p.getId(), "EN_ATTENTE");
+
+            // ── Modules enseignés ─────────────────────────────────────────────
+            List<String> modules = p.getCoursEnseignes() != null
+                    ? p.getCoursEnseignes().stream()
+                        .filter(Objects::nonNull)
+                        .map(Cours::getLibelle)
+                        .filter(Objects::nonNull)
+                        .distinct()
+                        .collect(Collectors.toList())
+                    : new ArrayList<>();
+
+            // ── Construction du DTO de base ───────────────────────────────────
+            Map<String, Object> dto = new HashMap<>();
+            dto.put("id",               p.getId());
+            dto.put("nom",              p.getNom());
+            dto.put("prenom",           p.getPrenom());
+            dto.put("name",             p.getPrenom() + " " + p.getNom());
+            dto.put("email",            p.getEmail() != null ? p.getEmail() : "—");
+            dto.put("heuresFormat",     heures + "h" + (minutes > 0 ? String.format("%02d", minutes) : ""));
+            dto.put("heures",           heures);
+            dto.put("seancesTotal",     totalSeances);
+            dto.put("seancesTerminees", seancesTerminees.size());
+            dto.put("justifsAttente",   justifsAttente);
+            dto.put("modules",          modules);
+
+            // Taux de présence : null = "pas encore calculé"
+            // Le frontend affiche un skeleton/spinner à la place
+            dto.put("tauxPresenceGlobal", null);
+            dto.put("modulesStats",       null);
+            dto.put("statsChargees",      false); // flag pour le frontend
+
+            result.add(dto);
+        }
+
+        result.sort(Comparator.comparing(m -> m.get("name").toString()));
+
+        System.out.println("✅ [PHASE 1] " + result.size() + " professeurs chargés (sans stats présence).");
+        return ResponseEntity.ok(result);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // GET /api/professeurs/{id}/stats-presence
+    //
+    // PHASE 2 — ENDPOINT LOURD (appelé prof par prof après l'affichage des cartes)
+    // Calcule le taux de présence global et par module pour UN seul professeur.
+    //
+    // Le frontend appelle cet endpoint en parallèle pour chaque prof,
+    // et met à jour chaque carte au fur et à mesure que les résultats arrivent.
+    //
+    // C'est là que se fait tout le travail lourd :
+    //   - parcourir toutes les séances terminées du prof
+    //   - pour chaque séance, compter les étudiants attendus et présents
+    //   - calculer le taux global et par module
+    // ─────────────────────────────────────────────────────────────────────────
+    @GetMapping("/{id}/stats-presence")
+    public ResponseEntity<Map<String, Object>> getStatsPresence(@PathVariable Long id) {
+
+        System.out.println("📊 [PHASE 2] Calcul stats présence pour professeur ID=" + id + "...");
+
+        Optional<Professeur> opt = professeurRepository.findById(id);
+        if (opt.isEmpty()) {
+            System.err.println("❌ [PHASE 2] Professeur ID=" + id + " introuvable.");
+            return ResponseEntity.notFound().build();
+        }
+
+        List<Etudiant> tousEtudiants = etudiantRepository.findAll();
+
+        // ── Récupérer toutes les séances terminées de ce prof ─────────────────
+        List<Seance> seancesTerminees = seanceRepository
+                .findByProfesseur_IdAndDateHeureFinBefore(id, LocalDateTime.now())
+                .stream()
+                .filter(Seance::isEstTerminee)
+                .collect(Collectors.toList());
+
+        System.out.println("   → " + seancesTerminees.size() + " séances terminées trouvées.");
+
+        // ── Calcul du taux global et par module ───────────────────────────────
+        long globalPresents = 0;
+        long globalAttendus = 0;
+        Map<String, long[]> parModule = new LinkedHashMap<>();
+        // parModule : { "NomModule" -> [nbPresents, nbAttendus] }
+
+        for (Seance s : seancesTerminees) {
+            String module       = s.getCours() != null ? s.getCours().getLibelle() : "Inconnu";
+            String groupeSeance = s.getGroupe();
+            if (groupeSeance == null || groupeSeance.isBlank()) continue;
+
+            // Étudiants attendus = ceux dont la spécialité correspond au groupe de la séance
+            long nbAttendus = tousEtudiants.stream()
+                    .filter(e -> e.getSpecialite() != null && !e.getSpecialite().isBlank())
+                    .filter(e -> groupeSeance.toLowerCase()
+                                             .contains(e.getSpecialite().toLowerCase()))
+                    .count();
+
+            // Présents = présences enregistrées avec statut PRESENT pour cette séance
+            long nbPresents = presenceRepository.findBySeance_Id(s.getId()).stream()
+                    .filter(pr -> "PRESENT".equals(pr.getStatutPresence()))
+                    .count();
+
+            globalAttendus += nbAttendus;
+            globalPresents += nbPresents;
+
+            // Accumulation par module
+            parModule.putIfAbsent(module, new long[]{0, 0});
+            parModule.get(module)[0] += nbPresents;
+            parModule.get(module)[1] += nbAttendus;
+        }
+
+        // ── Calcul du pourcentage global (plafonné à 100%) ────────────────────
+        long tauxGlobal = globalAttendus > 0
+                ? Math.min(Math.round(((double) globalPresents / globalAttendus) * 100), 100)
+                : 0;
+
+        // ── Construction de la liste de stats par module ──────────────────────
+        List<Map<String, Object>> modulesStats = new ArrayList<>();
+        for (Map.Entry<String, long[]> entry : parModule.entrySet()) {
+            long pres = entry.getValue()[0];
+            long att  = entry.getValue()[1];
+            long pct  = att > 0
+                    ? Math.min(Math.round(((double) pres / att) * 100), 100)
+                    : 0;
+            Map<String, Object> mStat = new HashMap<>();
+            mStat.put("libelle",  entry.getKey());
+            mStat.put("taux",     pct);
+            mStat.put("presents", pres);
+            mStat.put("attendus", att);
+            modulesStats.add(mStat);
+        }
+
+        System.out.println("✅ [PHASE 2] Prof ID=" + id
+                + " → Taux global=" + tauxGlobal + "%"
+                + " | " + modulesStats.size() + " module(s) calculé(s).");
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("profId",              id);
+        result.put("tauxPresenceGlobal",  tauxGlobal);
+        result.put("modulesStats",        modulesStats);
+        result.put("statsChargees",       true);
+
+        return ResponseEntity.ok(result);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // GET /api/professeurs/admin/tous-avec-stats
+    // (Conservé pour compatibilité — utilisé par d'autres parties de l'app)
     // ─────────────────────────────────────────────────────────────────────────
     @GetMapping("/admin/tous-avec-stats")
     public ResponseEntity<List<Map<String, Object>>> getTousAvecStats() {
+
+        System.out.println("📋 [TOUS-AVEC-STATS] Chargement complet de tous les professeurs...");
 
         List<Professeur> tous = professeurRepository.findAll();
         List<Etudiant> tousEtudiants = etudiantRepository.findAll();
@@ -209,7 +411,8 @@ public ResponseEntity<Map<String, Object>> getProfile(@PathVariable Long id) {
 
             long totalMinutes = seancesTerminees.stream()
                     .filter(s -> s.getDateHeureDebut() != null && s.getDateHeureFin() != null)
-                    .mapToLong(s -> Duration.between(s.getDateHeureDebut(), s.getDateHeureFin()).toMinutes())
+                    .mapToLong(s -> Duration.between(
+                            s.getDateHeureDebut(), s.getDateHeureFin()).toMinutes())
                     .sum();
             long heures  = totalMinutes / 60;
             long minutes = totalMinutes % 60;
@@ -222,23 +425,24 @@ public ResponseEntity<Map<String, Object>> getProfile(@PathVariable Long id) {
                     .countBySeance_Professeur_IdAndStatutValidation(p.getId(), "EN_ATTENTE");
 
             List<String> modules = p.getCoursEnseignes() != null
-                    ? p.getCoursEnseignes().stream().filter(Objects::nonNull).map(Cours::getLibelle)
-                        .filter(Objects::nonNull).distinct().collect(Collectors.toList())
+                    ? p.getCoursEnseignes().stream().filter(Objects::nonNull)
+                        .map(Cours::getLibelle).filter(Objects::nonNull)
+                        .distinct().collect(Collectors.toList())
                     : new ArrayList<>();
 
-            // ── CALCUL DES POURCENTAGES (Global + Par Module) ──
             long globalPresents = 0;
             long globalAttendus = 0;
-            Map<String, long[]> parModule = new HashMap<>(); // libelle -> [presents, attendus]
+            Map<String, long[]> parModule = new HashMap<>();
 
             for (Seance s : seancesTerminees) {
-                String module = s.getCours() != null ? s.getCours().getLibelle() : "Inconnu";
+                String module       = s.getCours() != null ? s.getCours().getLibelle() : "Inconnu";
                 String groupeSeance = s.getGroupe();
                 if (groupeSeance == null || groupeSeance.isBlank()) continue;
 
                 long nbAttendus = tousEtudiants.stream()
                         .filter(e -> e.getSpecialite() != null && !e.getSpecialite().isBlank())
-                        .filter(e -> groupeSeance.toLowerCase().contains(e.getSpecialite().toLowerCase()))
+                        .filter(e -> groupeSeance.toLowerCase()
+                                                 .contains(e.getSpecialite().toLowerCase()))
                         .count();
 
                 long nbPresents = presenceRepository.findBySeance_Id(s.getId()).stream()
@@ -252,16 +456,18 @@ public ResponseEntity<Map<String, Object>> getProfile(@PathVariable Long id) {
                 parModule.get(module)[1] += nbAttendus;
             }
 
-            long tauxGlobal = globalAttendus > 0 ? Math.round(((double) globalPresents / globalAttendus) * 100) : 0;
-            
+            long tauxGlobal = globalAttendus > 0
+                    ? Math.round(((double) globalPresents / globalAttendus) * 100) : 0;
+
             List<Map<String, Object>> modulesStats = new ArrayList<>();
             for (Map.Entry<String, long[]> entry : parModule.entrySet()) {
                 long p_pres = entry.getValue()[0];
-                long p_att = entry.getValue()[1];
-                long pct = p_att > 0 ? Math.round(((double) p_pres / p_att) * 100) : 0;
+                long p_att  = entry.getValue()[1];
+                long pct    = p_att > 0
+                        ? Math.round(((double) p_pres / p_att) * 100) : 0;
                 Map<String, Object> mStat = new HashMap<>();
                 mStat.put("libelle", entry.getKey());
-                mStat.put("taux", Math.min(pct, 100)); // Plafond à 100%
+                mStat.put("taux",    Math.min(pct, 100));
                 modulesStats.add(mStat);
             }
 
@@ -272,31 +478,32 @@ public ResponseEntity<Map<String, Object>> getProfile(@PathVariable Long id) {
             dto.put("name",             p.getPrenom() + " " + p.getNom());
             dto.put("email",            p.getEmail() != null ? p.getEmail() : "—");
             dto.put("heuresFormat",     heures + "h" + (minutes > 0 ? String.format("%02d", minutes) : ""));
+            dto.put("heures",           heures);
             dto.put("seancesTotal",     totalSeances);
             dto.put("seancesTerminees", seancesTerminees.size());
             dto.put("justifsAttente",   justifsAttente);
             dto.put("modules",          modules);
-            
-            // Nouvelles données de statistiques
             dto.put("tauxPresenceGlobal", Math.min(tauxGlobal, 100));
             dto.put("modulesStats",       modulesStats);
+            dto.put("statsChargees",      true);
 
             result.add(dto);
         }
 
         result.sort(Comparator.comparing(m -> m.get("name").toString()));
+        System.out.println("✅ [TOUS-AVEC-STATS] " + result.size() + " professeurs chargés avec stats complètes.");
         return ResponseEntity.ok(result);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // GET /api/professeurs/{id}/detail — inchangé
+    // GET /api/professeurs/{id}/detail  — inchangé
     // ─────────────────────────────────────────────────────────────────────────
     @GetMapping("/{id}/detail")
     public ResponseEntity<Map<String, Object>> getDetail(@PathVariable Long id) {
         Optional<Professeur> opt = professeurRepository.findById(id);
         if (opt.isEmpty()) return ResponseEntity.notFound().build();
 
-        Professeur p = opt.get();
+        Professeur p   = opt.get();
         LocalDateTime now   = LocalDateTime.now();
         LocalDateTime debut = now.minusMonths(11).withDayOfMonth(1).toLocalDate().atStartOfDay();
 
@@ -306,7 +513,8 @@ public ResponseEntity<Map<String, Object>> getProfile(@PathVariable Long id) {
 
         Map<String, Long> parMois = new LinkedHashMap<>();
         for (int i = 11; i >= 0; i--) {
-            LocalDateTime moisDebut = now.minusMonths(i).withDayOfMonth(1).toLocalDate().atStartOfDay();
+            LocalDateTime moisDebut = now.minusMonths(i).withDayOfMonth(1)
+                    .toLocalDate().atStartOfDay();
             String label = moisDebut.getMonth()
                     .getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.FRENCH)
                     + " " + moisDebut.getYear();
@@ -346,5 +554,75 @@ public ResponseEntity<Map<String, Object>> getProfile(@PathVariable Long id) {
         detail.put("justifsAttente",  justifsAttente);
         detail.put("seancesTotal",    seancesTerminees.size());
         return ResponseEntity.ok(detail);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // DELETE /api/professeurs/{id}  — admin uniquement
+    //
+    // STRATÉGIE "SOFT ANONYMISATION" (identique à celle des étudiants) :
+    // On ne supprime PAS physiquement le professeur de la base de données.
+    //
+    // Pourquoi ? Parce qu'un professeur peut avoir :
+    //   - des séances passées avec des présences d'étudiants liées
+    //   - des justificatifs soumis par des étudiants
+    //   - un historique dans les stats du dashboard
+    //
+    // Supprimer physiquement casserait toutes ces références (clés étrangères).
+    //
+    // À la place, on :
+    //   1. Remplace nom/prénom par "Inconnu" → disparaît des listes admin
+    //   2. Efface email et mot de passe → plus de connexion possible
+    //   3. Conserve la ligne en base → toutes les séances/stats restent cohérentes
+    // ─────────────────────────────────────────────────────────────────────────
+    @DeleteMapping("/{id}")
+    public ResponseEntity<?> supprimerProfesseur(
+            @PathVariable Long id,
+            HttpServletRequest request) {
+
+        // ── Vérification du rôle admin ────────────────────────────────────────
+        String role = (String) request.getAttribute("role");
+        if (!"admin".equals(role)) {
+            System.err.println("⛔ [DELETE PROF] Tentative de suppression sans rôle admin. ID=" + id);
+            return ResponseEntity.status(403).body(Map.of(
+                "success", false,
+                "message", "Accès refusé. Seul un administrateur peut supprimer un professeur."
+            ));
+        }
+
+        // ── Vérifier que le professeur existe ─────────────────────────────────
+        Optional<Professeur> opt = professeurRepository.findById(id);
+        if (opt.isEmpty()) {
+            System.err.println("❌ [DELETE PROF] Professeur ID=" + id + " introuvable.");
+            return ResponseEntity.status(404).body(Map.of(
+                "success", false,
+                "message", "Professeur introuvable (ID: " + id + ")."
+            ));
+        }
+
+        Professeur p = opt.get();
+
+        // ── Compter les séances liées (pour le log) ───────────────────────────
+        long nbSeances = seanceRepository
+                .findByProfesseur_IdAndDateHeureFinBefore(id, LocalDateTime.now())
+                .size();
+
+        System.out.println("🗑️ [DELETE PROF] Anonymisation du professeur ID=" + id
+                + " (" + p.getPrenom() + " " + p.getNom() + ")"
+                + " — " + nbSeances + " séance(s) conservée(s) en base.");
+
+        // ── Anonymisation : effacement de toutes les données personnelles ──────
+        p.setNom("Inconnu");
+        p.setPrenom("Inconnu");
+        p.setEmail(null);
+        p.setMotDePasse(null);   // désactive le compte → plus de connexion possible
+
+        professeurRepository.save(p);
+
+        System.out.println("✅ [DELETE PROF] Professeur ID=" + id + " anonymisé avec succès.");
+
+        return ResponseEntity.ok(Map.of(
+            "success", true,
+            "message", "Professeur supprimé avec succès. Ses séances et historiques ont été conservés."
+        ));
     }
 }
